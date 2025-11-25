@@ -192,6 +192,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span className="font-bold">Smart (Default)</span>
                 <span className="text-xs opacity-70">Gemini 3 Pro</span>
               </button>
+              
+              {/* Local Models */}
+              <button
+                onClick={() => onUpdateSettings({ ...settings, storyModel: StoryModel.LocalQwen })}
+                className={`p-3 rounded border flex flex-col items-center gap-2 transition-all ${
+                  settings.storyModel === StoryModel.LocalQwen 
+                    ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                }`}
+              >
+                <Monitor size={20} />
+                <span className="font-bold">Local Qwen</span>
+                <span className="text-xs opacity-70">qwen3:8b (Ollama)</span>
+              </button>
+              <button
+                onClick={() => onUpdateSettings({ ...settings, storyModel: StoryModel.LocalGemma })}
+                className={`p-3 rounded border flex flex-col items-center gap-2 transition-all ${
+                  settings.storyModel === StoryModel.LocalGemma 
+                    ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                }`}
+              >
+                <Monitor size={20} />
+                <span className="font-bold">Local Gemma</span>
+                <span className="text-xs opacity-70">gemma3:27b (Ollama)</span>
+              </button>
             </div>
           </div>
 

@@ -10,6 +10,7 @@ import { DiceRoller } from './components/DiceRoller';
 import { MainMenu } from './components/MainMenu';
 import { GameOverScreen } from './components/GameOverScreen';
 import { CustomChoiceModal } from './components/CustomChoiceModal';
+import { DebugConsole } from './components/DebugConsole';
 import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale } from './types';
 import { generateStoryStep, generateGameSummary, generateStoryboard } from './services/gemini';
 import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle } from 'lucide-react';
@@ -114,7 +115,7 @@ const App: React.FC = () => {
   useEffect(() => {
       if (gameState.phase === 'game_over' && !gameState.finalSummary) {
           const fullLog = gameState.history.map(t => `${t.isUserTurn ? 'USER' : 'DM'}: ${t.text}`).join('\n');
-          generateGameSummary(fullLog).then(summary => {
+          generateGameSummary(fullLog, settings.storyModel).then(summary => {
               setGameState(prev => ({ ...prev, finalSummary: summary }));
               
               // Only generate storyboard if user has API key (uses paid model generally)
@@ -128,7 +129,7 @@ const App: React.FC = () => {
               }
           });
       }
-  }, [gameState.phase, gameState.finalSummary, gameState.history, hasApiKey]);
+  }, [gameState.phase, gameState.finalSummary, gameState.history, hasApiKey, settings.storyModel]);
 
   // Derived Stats Calculation
   const currentStats = useMemo(() => {
@@ -483,24 +484,8 @@ const App: React.FC = () => {
         }
 
         let newStats = { ...prev.stats };
-        let finalStatsUpdate: Partial<CharacterStats> | undefined = undefined;
         let finalStatExp = { ...prev.statExperience };
         
-        if (aiResponse.stats_update) {
-            finalStatsUpdate = {};
-            const keys = Object.keys(aiResponse.stats_update) as Array<keyof CharacterStats>;
-            keys.forEach(key => {
-                let val = aiResponse.stats_update![key] || 0;
-                if (val > 5) val = 5; 
-                if (val < -2) val = -2;
-                if (val !== 0) {
-                    finalStatsUpdate![key] = val;
-                    newStats[key] += val;
-                }
-            });
-            if (Object.keys(finalStatsUpdate).length === 0) finalStatsUpdate = undefined;
-        }
-
         const brandNewEffects: StatusEffect[] = (aiResponse.new_effects || []).map(e => ({
             ...e,
             id: Math.random().toString(36).substring(7)
@@ -568,7 +553,6 @@ const App: React.FC = () => {
             choices: aiResponse.choices,
             // No per-turn image
             isUserTurn: false,
-            statsUpdated: finalStatsUpdate, 
             inventoryAdded: newItems,
             inventoryRemoved: aiResponse.inventory_removed,
             newEffects: brandNewEffects.length > 0 ? brandNewEffects : undefined,
@@ -952,6 +936,8 @@ const App: React.FC = () => {
         equipped={gameState.equipped}
         remainingUses={gameState.customChoicesRemaining}
       />
+      
+      <DebugConsole />
     </div>
   );
 };

@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect, NPC } from "../types";
+import { debugLog } from "./debugLog";
 
 const getAIClient = () => {
   const apiKey = process.env.API_KEY;
@@ -11,30 +12,57 @@ const getAIClient = () => {
 };
 
 const SYSTEM_INSTRUCTION = `
-You are the Dungeon Master for an immersive, infinite RPG.
-Your goal is to weave a compelling narrative based on the user's choices, GENRE, and STATS.
+You are the Game Engine and Dungeon Master for a text-based RPG. 
+Your primary function is to manage the GAME STATE strictly, and your secondary function is to narrate the story.
 
-Rules:
-1.  **Genre & Tone**: Adhere strictly to the selected genre (e.g., Fantasy, Sci-Fi, Horror).
-2.  **Stats**: STR (Power), DEX (Agility), CON (Health), INT (Magic/Mind), CHA (Presence).
-3.  **Equipment & Inventory (STRICT)**:
-    *   **Context Matches Gear**: If the user chooses "Shoot them", CHECK THEIR EQUIPPED GEAR. If they hold a Sword, they fail or throw it.
-    *   **Auto-Equip**: If the user's choice implies using an item they have in their **Backpack** (Inventory) but NOT equipped (e.g., "I pull out my Shotgun"), you MUST:
-        *   Narrate the action of drawing the weapon.
-        *   Populate 'equipment_update.equip' with the Item Name.
-    *   **Lost Items**: If the narrative implies an item is broken, lost, or consumed (e.g., "The grenade explodes", "You drop the key"), CHECK if it exists in Inventory or Equipped. If yes, populate 'inventory_removed'. If no, simply mock the user for trying to use what they don't have.
-4.  **Heroic Actions (Anti-Cheat)**: 
-    *   If a user Custom Action attempts to conjure items they do not possess, DENY IT. Mock them.
-    *   If they attempt an action physically impossible given the state, make them fail.
-5.  **Skill Checks & Choices**:
-    *   When generating choices, if an action is risky, assign a 'type' (STAT) and 'difficulty' (DC 5-30).
-    *   **Formatting**: In the 'text' of the choice, wrap the specific **verb or action phrase** that corresponds to the skill check in asterisks (*).
-6.  **Status Effects**:
-    *   Apply logic to the narrative. If the player is hurt, dizzy, terrified, or empowered, apply a **Status Effect**.
-7.  **NPC Tracking**:
-    *   Track significant characters. Use \`npcs_update\` to add or update their condition (Healthy -> Dead).
+### GAMEPLAY RULES (STRICT ENFORCEMENT)
+1. **Inventory vs. Equipped**: 
+   - The player CANNOT use items in 'BACKPACK_CONTENTS' for combat/actions immediately. They must equip them first.
+   - If the player tries to shoot a gun but only has a sword EQUIPPED, they effectively throw the sword or fail.
+   - **Auto-Equip**: If the player says "I draw my Pistol" and they have one in the Backpack, use the 'equipment_update' field to equip it.
 
-The current state (inventory, quest, hp, stats, active effects, known NPCs) will be provided.
+2. **Game Balance & Loot**:
+   - Do NOT hand out "Legendary" items early. Keep bonuses small (+1 to +3).
+   - Use the 'inventory_added' field for new items. Do NOT just mention them in text.
+   - **Stat Generation**: Only assign bonuses if logically consistent (e.g., Heavy Armor reduces DEX, increases CON).
+
+3. **Action Resolution (Dice Rolls)**:
+   - **Standard Choices**: The outcome is already decided by the provided 'rollResult'. NARRATE the success or failure matching that result.
+   - **Custom Actions**: 
+     1. Analyze the action's difficulty (DC 5=Easy, 15=Hard, 25=Impossible) based *only* on the narrative situation.
+     2. *Then* compare with the provided 'customAction.roll' + Stat Mod.
+     3. If Roll < DC, they FAIL. Do not be lenient. Failures make the story interesting.
+
+4. **Status Effects**:
+   - If the player takes massive damage or hits a trap, apply a 'new_effect' (e.g., "Concussed", "Bleeding").
+   - Effects should have mechanical consequences (statModifiers).
+
+### OUTPUT FORMAT
+You must return valid JSON matching the schema.
+`;
+
+const OLLAMA_JSON_SCHEMA = `
+REQUIRED JSON STRUCTURE:
+{
+  "narrative": "string (The story text)",
+  "choices": [
+    {
+      "text": "string (Action description. Wrap key verbs in *asterisks*)",
+      "type": "string (Optional: 'STR', 'DEX', 'CON', 'INT', 'CHA')",
+      "difficulty": "number (Optional: DC 5-30)"
+    }
+  ],
+  "inventory_added": [
+    { "name": "string", "type": "string", "description": "string", "bonuses": { "STR": 0, "DEX": 0, "CON": 0, "INT": 0, "CHA": 0 } }
+  ],
+  "inventory_removed": ["string (item names)"],
+  "equipment_update": { "equip": ["string"], "unequip": ["string"] },
+  "hp_change": "number (negative for damage)",
+  "game_status": "string ('ongoing', 'won', 'lost')",
+  "new_effects": [],
+  "npcs_update": { "add": [], "update": [], "remove": [] }
+}
+IMPORTANT: You MUST provide at least 2 options in the "choices" array.
 `;
 
 const formatEquipped = (equipped: EquippedGear) => {
@@ -51,6 +79,34 @@ const formatEquipped = (equipped: EquippedGear) => {
 const formatNPCs = (npcs: NPC[]) => {
     if (npcs.length === 0) return "None known.";
     return npcs.map(n => `${n.name} (${n.type}): ${n.condition}`).join(', ');
+};
+
+const callOllama = async (model: string, prompt: string, systemInstruction: string, jsonMode: boolean = true): Promise<string> => {
+  try {
+    const response = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: prompt,
+        system: systemInstruction,
+        format: jsonMode ? "json" : undefined,
+        stream: false
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.response;
+  } catch (error) {
+    console.error("Ollama call failed:", error);
+    throw error;
+  }
 };
 
 export const generateStoryStep = async (
@@ -104,31 +160,51 @@ export const generateStoryStep = async (
   const npcString = formatNPCs(knownNPCs);
 
   const prompt = `
-    Context:
-    - Genre: ${genre}
-    - Base Stats: STR:${stats.STR}, DEX:${stats.DEX}, CON:${stats.CON}, INT:${stats.INT}, CHA:${stats.CHA}
+    [GAME STATE]
+    Genre: ${genre}
+    Health: ${currentHp} / ${stats.CON * 10 + 100}
+    Quest: "${currentQuest}"
     
-    Current Loadout (CRITICAL - RESPECT THIS):
+    [EQUIPPED_GEAR (ACTIVE)]
     ${equippedString}
     
-    Known People/NPCs:
-    ${npcString}
-    
-    Stowed in Backpack (Must spend turn to equip): 
+    [BACKPACK_CONTENTS (INACTIVE - Must Equip to Use)]
     ${JSON.stringify(inventoryNames)}
     
-    - Quest: "${currentQuest}"
-    - HP: ${currentHp} (Max based on CON)
+    [KNOWN_NPCS]
+    ${npcString}
     
-    Previous Story:
+    [RECENT_HISTORY]
     ${previousHistory}
     
+    [PLAYER_ACTION]
     ${actionDescription}
     
-    Generate the next segment.
+    Based on the above, generate the next story segment in JSON.
   `;
 
+  debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep', model: modelName, content: prompt });
+
   try {
+    if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma) {
+        try {
+            // Append explicit schema for Ollama since it doesn't support responseSchema in the same way
+            const localSystemInstruction = SYSTEM_INSTRUCTION + "\n" + OLLAMA_JSON_SCHEMA;
+            const responseText = await callOllama(modelName, prompt, localSystemInstruction, true);
+            debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: responseText });
+            return JSON.parse(responseText) as AIStoryResponse;
+        } catch (error) {
+            debugLog.addLog({ type: 'error', endpoint: 'generateStoryStep', model: modelName, content: error });
+            console.error("Local LLM generation failed:", error);
+            return {
+                narrative: "The local spirits are silent... (Ollama Error: Ensure Ollama is running and the model is pulled)",
+                choices: [{ text: "Try again" }],
+                hp_change: 0,
+                game_status: 'ongoing'
+            };
+        }
+    }
+
     const response = await ai.models.generateContent({
       model: modelName,
       contents: prompt,
@@ -187,17 +263,6 @@ export const generateStoryStep = async (
             quest_update: { type: Type.STRING },
             hp_change: { type: Type.INTEGER },
             game_status: { type: Type.STRING, enum: ['ongoing', 'won', 'lost'] },
-            stats_update: {
-                type: Type.OBJECT,
-                description: "Optional: Increase a stat. Normal (+1), Special Event (+3 to +5).",
-                properties: {
-                    STR: { type: Type.INTEGER },
-                    DEX: { type: Type.INTEGER },
-                    CON: { type: Type.INTEGER },
-                    INT: { type: Type.INTEGER },
-                    CHA: { type: Type.INTEGER },
-                }
-            },
             new_effects: {
                 type: Type.ARRAY,
                 description: "Add temporary buffs or debuffs based on narrative context.",
@@ -275,8 +340,10 @@ export const generateStoryStep = async (
     const text = response.text;
     if (!text) throw new Error("No response text from AI");
     
+    debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: text });
     return JSON.parse(text) as AIStoryResponse;
   } catch (error) {
+    debugLog.addLog({ type: 'error', endpoint: 'generateStoryStep', model: modelName, content: error });
     console.error("Story generation failed:", error);
     return {
       narrative: "The mists of time obscure the path forward... (AI Error, please try again)",
@@ -287,7 +354,7 @@ export const generateStoryStep = async (
   }
 };
 
-export const generateGameSummary = async (historyText: string): Promise<string> => {
+export const generateGameSummary = async (historyText: string, modelName: StoryModel = StoryModel.Fast): Promise<string> => {
   const ai = getAIClient();
   const prompt = `
   Read the following adventure log and write a concise, engaging summary (3-5 sentences) of the entire journey. 
@@ -297,13 +364,30 @@ export const generateGameSummary = async (historyText: string): Promise<string> 
   ${historyText}
   `;
   
+  debugLog.addLog({ type: 'request', endpoint: 'generateGameSummary', model: modelName, content: prompt });
+
   try {
+      if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma) {
+          try {
+              const responseText = await callOllama(modelName, prompt, "You are a fantasy chronicler summarizing an adventure.", false);
+              debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: modelName, content: responseText });
+              return responseText;
+          } catch (e) {
+             debugLog.addLog({ type: 'error', endpoint: 'generateGameSummary', model: modelName, content: e });
+             console.error("Local summary failed", e);
+             return "Summary unavailable (Local LLM Error).";
+          }
+      }
+
       const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: prompt
       });
-      return response.text || "The tale is lost to the void.";
+      const text = response.text || "The tale is lost to the void.";
+      debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: 'gemini-2.5-flash', content: text });
+      return text;
   } catch(e) {
+      debugLog.addLog({ type: 'error', endpoint: 'generateGameSummary', model: 'gemini-2.5-flash', content: e });
       console.error(e);
       return "Summary unavailable.";
   }
@@ -323,6 +407,8 @@ export const generateStoryboard = async (summary: string): Promise<string | null
     Make it look epic and cohesive.
     `;
 
+    debugLog.addLog({ type: 'request', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: prompt });
+
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-image-preview',
@@ -335,6 +421,8 @@ export const generateStoryboard = async (summary: string): Promise<string | null
             }
         });
 
+        debugLog.addLog({ type: 'response', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: response });
+
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
                 return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
@@ -342,6 +430,7 @@ export const generateStoryboard = async (summary: string): Promise<string | null
         }
         return null;
     } catch (e) {
+        debugLog.addLog({ type: 'error', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: e });
         console.error("Storyboard generation failed", e);
         return null;
     }

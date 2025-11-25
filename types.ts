@@ -102,7 +102,6 @@ export interface StoryTurn {
   isUserTurn?: boolean;
   rollResult?: RollResult;
   levelUpEvent?: LevelUpEvent; // Notification for UI
-  statsUpdated?: Partial<CharacterStats>; // From AI or Usage
   inventoryAdded?: InventoryItem[];
   inventoryRemoved?: string[];
   newEffects?: StatusEffect[];
@@ -127,7 +126,6 @@ export interface AIStoryResponse {
   visual_prompt?: string;
   hp_change?: number;
   game_status?: GameStatus;
-  stats_update?: Partial<CharacterStats>; // AI suggests a stat increase
   new_effects?: StatusEffect[];
   npcs_update?: {
       add?: NPC[];
@@ -152,6 +150,8 @@ export enum ImageSize {
 export enum StoryModel {
   Smart = "gemini-3-pro-preview",
   Fast = "gemini-2.5-flash",
+  LocalQwen = "qwen3:8b",
+  LocalGemma = "gemma3:27b",
 }
 
 export enum UIScale {
