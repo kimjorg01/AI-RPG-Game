@@ -8,12 +8,15 @@ interface StoryFeedProps {
   isThinking: boolean;
 }
 
-// Simple text parser for bold markdown
+// Simple text parser for bold markdown and emphasis
 const parseText = (text: string) => {
-    const parts = text.split(/(\*\*.*?\*\*)/g);
+    const parts = text.split(/(\*{1,2}[^*]+?\*{1,2})/g);
     return parts.map((part, index) => {
         if (part.startsWith('**') && part.endsWith('**')) {
             return <strong key={index} className="text-zinc-100 font-bold tracking-wide">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('*') && part.endsWith('*')) {
+            return <span key={index} className="text-amber-200 font-bold tracking-wide">{part.slice(1, -1)}</span>;
         }
         return part;
     });

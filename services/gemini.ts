@@ -44,14 +44,14 @@ DO NOT USE JSON. Use the standard Game Format below.
 (Write the story here. Use *asterisks* for emphasis.)
 
 ### CHOICES
-1. [Action Description] | [Stat (STR/DEX/CON/INT/CHA/PER) or NONE] | [DC (5-30) or 0]
-2. [Action Description] | [Stat] | [DC]
+1. Action Description (MUST DO: Wrap ability describing words in *asterisks*) | Stat (STR/DEX/CON/INT/CHA/PER) or NONE | DC (5-30) or 0
+2. Action Description | Stat | DC
 
 ### UPDATES
 HP: [Number, e.g. -5, +2, 0]
 STATUS: [ongoing, won, lost]
 QUEST: [New objective or SAME]
-ITEM_ADD: [Name] | [Type (weapon/armor/accessory/misc)] | [Description] | [Bonuses (e.g. STR, PER) or NONE] | [Values (e.g. 8, 12) or NONE]
+ITEM_ADD: [Name] | [Type (weapon/armor/accessory/misc)] | [Description] | [Bonuses (e.g. STR:1, PER:2) or NONE]
 ITEM_REMOVE: [Name]
 EQUIP: [Name]
 UNEQUIP: [Name]
@@ -67,7 +67,8 @@ SUCCESS: [true/false]
 
 const parseTextResponse = (text: string): AIStoryResponse => {
     const sections: Record<string, string> = {};
-    const sectionRegex = /###\s*([A-Z_]+)(?:\r?\n|\r)([\s\S]*?)(?=(?:###\s*[A-Z_]+)|$)/g;
+    // Regex now allows for horizontal whitespace [ \t]* after the section header before the newline
+    const sectionRegex = /###\s*([A-Z_]+)[ \t]*(?:\r?\n|\r)([\s\S]*?)(?=(?:###\s*[A-Z_]+)|$)/g;
     
     let match;
     while ((match = sectionRegex.exec(text)) !== null) {
@@ -88,7 +89,11 @@ const parseTextResponse = (text: string): AIStoryResponse => {
         response.choices = lines.map(line => {
             // Expected: 1. Do something | STR | 15
             const parts = line.replace(/^\d+\.\s*/, '').split('|').map(p => p.trim());
-            const text = parts[0];
+            let text = parts[0];
+            // Clean up AI habit of wrapping in brackets
+            if (text.startsWith('[') && text.endsWith(']')) {
+                text = text.slice(1, -1);
+            }
             const type = (parts[1] === 'NONE' || !parts[1]) ? undefined : (parts[1] as any);
             const difficulty = parts[2] ? parseInt(parts[2]) : undefined;
             
@@ -122,17 +127,20 @@ const parseTextResponse = (text: string): AIStoryResponse => {
             if (cleanLine.startsWith('ITEM_ADD:')) {
                 const parts = cleanLine.replace('ITEM_ADD:', '').split('|').map(p => p.trim());
                 
-                // Parse Bonuses: "STR:1, DEX:2"
+                // Parse Bonuses: "STR:1, DEX:2" or "STR+1"
                 let bonuses: any = undefined;
                 if (parts[3] && parts[3] !== 'NONE') {
                     bonuses = {};
-                    const bonusParts = parts[3].split(',');
-                    bonusParts.forEach(b => {
-                        const [stat, val] = b.split(':').map(s => s.trim());
-                        if (stat && val) {
-                            bonuses[stat] = parseInt(val);
+                    // Robust regex to catch STR:1, STR+1, STR 1
+                    const bonusRegex = /([A-Z]{3})\s*[:=+]?\s*(\d+)/g;
+                    let match;
+                    while ((match = bonusRegex.exec(parts[3])) !== null) {
+                        const stat = match[1];
+                        const val = parseInt(match[2]);
+                        if (stat && !isNaN(val)) {
+                            bonuses[stat] = val;
                         }
-                    });
+                    }
                 }
 
                 if (!response.inventory_added) response.inventory_added = [];
