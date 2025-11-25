@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect, NPC } from "../types";
+import { GoogleGenAI } from "@google/genai";
+import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect } from "../types";
 import { debugLog } from "./debugLog";
 
 const getAIClient = () => {
@@ -38,32 +38,161 @@ Your primary function is to manage the GAME STATE strictly, and your secondary f
    - Effects should have mechanical consequences (statModifiers).
 
 ### OUTPUT FORMAT
-You must return valid JSON matching the schema.
+DO NOT USE JSON. Use the standard Game Format below.
+
+### NARRATIVE
+(Write the story here. Use *asterisks* for emphasis.)
+
+### CHOICES
+1. [Action Description] | [Stat (STR/DEX/CON/INT/CHA/PER) or NONE] | [DC (5-30) or 0]
+2. [Action Description] | [Stat] | [DC]
+
+### UPDATES
+HP: [Number, e.g. -5, +2, 0]
+STATUS: [ongoing, won, lost]
+QUEST: [New objective or SAME]
+ITEM_ADD: [Name] | [Type (weapon/armor/accessory/misc)] | [Description] | [Bonuses (e.g. STR, PER) or NONE] | [Values (e.g. 8, 12) or NONE]
+ITEM_REMOVE: [Name]
+EQUIP: [Name]
+UNEQUIP: [Name]
+EFFECT_ADD: [Name] | [buff/debuff] | [Duration (turns)]
+
+### ACTION_RESULT (Only for Custom Actions)
+STAT: [Stat]
+DC: [Number]
+BASE: [Number]
+TOTAL: [Number]
+SUCCESS: [true/false]
 `;
 
-const OLLAMA_JSON_SCHEMA = `
-REQUIRED JSON STRUCTURE:
-{
-  "narrative": "string (The story text)",
-  "choices": [
-    {
-      "text": "string (Action description. Wrap key verbs in *asterisks*)",
-      "type": "string (Optional: 'STR', 'DEX', 'CON', 'INT', 'CHA')",
-      "difficulty": "number (Optional: DC 5-30)"
+const parseTextResponse = (text: string): AIStoryResponse => {
+    const sections: Record<string, string> = {};
+    const sectionRegex = /###\s*([A-Z_]+)(?:\r?\n|\r)([\s\S]*?)(?=(?:###\s*[A-Z_]+)|$)/g;
+    
+    let match;
+    while ((match = sectionRegex.exec(text)) !== null) {
+        sections[match[1].trim()] = match[2].trim();
     }
-  ],
-  "inventory_added": [
-    { "name": "string", "type": "string", "description": "string", "bonuses": { "STR": 0, "DEX": 0, "CON": 0, "INT": 0, "CHA": 0 } }
-  ],
-  "inventory_removed": ["string (item names)"],
-  "equipment_update": { "equip": ["string"], "unequip": ["string"] },
-  "hp_change": "number (negative for damage)",
-  "game_status": "string ('ongoing', 'won', 'lost')",
-  "new_effects": [],
-  "npcs_update": { "add": [], "update": [], "remove": [] }
+
+    // Defaults
+    const response: AIStoryResponse = {
+        narrative: sections['NARRATIVE'] || text, // Fallback to full text if no sections
+        choices: [],
+        game_status: 'ongoing',
+        hp_change: 0
+    };
+
+    // Parse Choices
+    if (sections['CHOICES']) {
+        const lines = sections['CHOICES'].split(/\r?\n/).filter(l => l.trim().length > 0);
+        response.choices = lines.map(line => {
+            // Expected: 1. Do something | STR | 15
+            const parts = line.replace(/^\d+\.\s*/, '').split('|').map(p => p.trim());
+            const text = parts[0];
+            const type = (parts[1] === 'NONE' || !parts[1]) ? undefined : (parts[1] as any);
+            const difficulty = parts[2] ? parseInt(parts[2]) : undefined;
+            
+            return { text, type, difficulty };
+        });
+    }
+    
+    // Parse Updates
+    if (sections['UPDATES']) {
+        const lines = sections['UPDATES'].split(/\r?\n/);
+        for (const line of lines) {
+            const cleanLine = line.trim();
+            if (!cleanLine) continue;
+
+            if (cleanLine.startsWith('HP:')) response.hp_change = parseInt(cleanLine.replace('HP:', '').trim()) || 0;
+            if (cleanLine.startsWith('STATUS:')) {
+                const status = cleanLine.replace('STATUS:', '').trim();
+                if (status === 'won' || status === 'lost') {
+                    response.game_status = status;
+                } else {
+                    // If AI says "SAME" or anything else, keep it ongoing
+                    response.game_status = 'ongoing';
+                }
+            }
+            if (cleanLine.startsWith('QUEST:')) {
+                const q = cleanLine.replace('QUEST:', '').trim();
+                if (q !== 'SAME') response.quest_update = q;
+            }
+            
+            // Items
+            if (cleanLine.startsWith('ITEM_ADD:')) {
+                const parts = cleanLine.replace('ITEM_ADD:', '').split('|').map(p => p.trim());
+                
+                // Parse Bonuses: "STR:1, DEX:2"
+                let bonuses: any = undefined;
+                if (parts[3] && parts[3] !== 'NONE') {
+                    bonuses = {};
+                    const bonusParts = parts[3].split(',');
+                    bonusParts.forEach(b => {
+                        const [stat, val] = b.split(':').map(s => s.trim());
+                        if (stat && val) {
+                            bonuses[stat] = parseInt(val);
+                        }
+                    });
+                }
+
+                if (!response.inventory_added) response.inventory_added = [];
+                response.inventory_added.push({
+                    name: parts[0],
+                    type: (parts[1] as any) || 'misc',
+                    description: parts[2] || '',
+                    bonuses: bonuses
+                });
+            }
+
+            if (cleanLine.startsWith('ITEM_REMOVE:')) {
+                const name = cleanLine.replace('ITEM_REMOVE:', '').trim();
+                if (!response.inventory_removed) response.inventory_removed = [];
+                response.inventory_removed.push(name);
+            }
+
+            if (cleanLine.startsWith('EQUIP:')) {
+                const name = cleanLine.replace('EQUIP:', '').trim();
+                if (!response.equipment_update) response.equipment_update = { equip: [], unequip: [] };
+                response.equipment_update.equip?.push(name);
+            }
+
+            if (cleanLine.startsWith('UNEQUIP:')) {
+                const name = cleanLine.replace('UNEQUIP:', '').trim();
+                if (!response.equipment_update) response.equipment_update = { equip: [], unequip: [] };
+                response.equipment_update.unequip?.push(name);
+            }
+
+            if (cleanLine.startsWith('EFFECT_ADD:')) {
+                const parts = cleanLine.replace('EFFECT_ADD:', '').split('|').map(p => p.trim());
+                if (!response.new_effects) response.new_effects = [];
+                response.new_effects.push({
+                    id: Math.random().toString(36).substring(7), // Generate ID
+                    name: parts[0],
+                    type: (parts[1] as any) || 'debuff',
+                    description: parts[0], // Default description to name
+                    duration: parseInt(parts[2]) || 3
+                });
+            }
+        }
+    }
+
+    // Parse Action Result
+    if (sections['ACTION_RESULT']) {
+        const lines = sections['ACTION_RESULT'].split(/\r?\n/);
+        const result: any = {};
+        for (const line of lines) {
+            const [key, val] = line.split(':').map(s => s.trim());
+            if (key === 'STAT') result.stat = val;
+            if (key === 'DC') result.difficulty = parseInt(val);
+            if (key === 'BASE') result.base_roll = parseInt(val);
+            if (key === 'TOTAL') result.total = parseInt(val);
+            if (key === 'SUCCESS') result.is_success = val.toLowerCase() === 'true';
+        }
+        if (result.stat) response.action_result = result;
+    }
+    
+    return response;
 }
-IMPORTANT: You MUST provide at least 2 options in the "choices" array.
-`;
 
 const formatEquipped = (equipped: EquippedGear) => {
     const parts = [];
@@ -74,11 +203,6 @@ const formatEquipped = (equipped: EquippedGear) => {
     if (equipped.accessory) parts.push(`[TRINKET]: ${equipped.accessory.name} (${JSON.stringify(equipped.accessory.bonuses)})`);
     
     return parts.join('\n    ');
-};
-
-const formatNPCs = (npcs: NPC[]) => {
-    if (npcs.length === 0) return "None known.";
-    return npcs.map(n => `${n.name} (${n.type}): ${n.condition}`).join(', ');
 };
 
 const callOllama = async (model: string, prompt: string, systemInstruction: string, jsonMode: boolean = true): Promise<string> => {
@@ -118,7 +242,6 @@ export const generateStoryStep = async (
   currentHp: number,
   stats: CharacterStats,
   activeEffects: StatusEffect[],
-  knownNPCs: NPC[],
   genre: string,
   rollResult: RollResult | null,
   customAction: { text: string, item: string, roll: number } | null,
@@ -157,7 +280,6 @@ export const generateStoryStep = async (
 
   const inventoryNames = currentInventory.map(i => i.name);
   const equippedString = formatEquipped(equipped);
-  const npcString = formatNPCs(knownNPCs);
 
   const prompt = `
     [GAME STATE]
@@ -171,28 +293,24 @@ export const generateStoryStep = async (
     [BACKPACK_CONTENTS (INACTIVE - Must Equip to Use)]
     ${JSON.stringify(inventoryNames)}
     
-    [KNOWN_NPCS]
-    ${npcString}
-    
     [RECENT_HISTORY]
     ${previousHistory}
     
     [PLAYER_ACTION]
     ${actionDescription}
     
-    Based on the above, generate the next story segment in JSON.
+    Based on the above, generate the next story segment in the requested format.
   `;
 
   debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep', model: modelName, content: prompt });
 
   try {
+    // Use Text Parsing for ALL models for robustness and token efficiency
     if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma) {
         try {
-            // Append explicit schema for Ollama since it doesn't support responseSchema in the same way
-            const localSystemInstruction = SYSTEM_INSTRUCTION + "\n" + OLLAMA_JSON_SCHEMA;
-            const responseText = await callOllama(modelName, prompt, localSystemInstruction, true);
+            const responseText = await callOllama(modelName, prompt, SYSTEM_INSTRUCTION, false); // jsonMode = false
             debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: responseText });
-            return JSON.parse(responseText) as AIStoryResponse;
+            return parseTextResponse(responseText);
         } catch (error) {
             debugLog.addLog({ type: 'error', endpoint: 'generateStoryStep', model: modelName, content: error });
             console.error("Local LLM generation failed:", error);
@@ -205,135 +323,13 @@ export const generateStoryStep = async (
         }
     }
 
+    // For Gemini, we also use the text format now
     const response = await ai.models.generateContent({
       model: modelName,
       contents: prompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            narrative: { type: Type.STRING, description: "The story text." },
-            choices: { 
-              type: Type.ARRAY, 
-              description: "2-4 options. Add 'type' and 'difficulty' ONLY if the choice carries a risk of failure.",
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                    text: { type: Type.STRING, description: "Description of the action. Wrap the key VERB/ACTION in asterisks * like *THIS*." },
-                    type: { type: Type.STRING, enum: ['STR', 'DEX', 'CON', 'INT', 'CHA'], nullable: true },
-                    difficulty: { type: Type.INTEGER, nullable: true, description: "DC between 5 and 30" }
-                },
-                required: ["text"]
-              }
-            },
-            inventory_added: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  type: { type: Type.STRING, enum: ['weapon', 'armor', 'accessory', 'misc'] },
-                  description: { type: Type.STRING },
-                  bonuses: {
-                    type: Type.OBJECT,
-                    properties: {
-                      STR: { type: Type.INTEGER },
-                      DEX: { type: Type.INTEGER },
-                      CON: { type: Type.INTEGER },
-                      INT: { type: Type.INTEGER },
-                      CHA: { type: Type.INTEGER },
-                    },
-                    nullable: true
-                  }
-                },
-                required: ["name", "type"]
-              } 
-            },
-            inventory_removed: { type: Type.ARRAY, items: { type: Type.STRING } },
-            equipment_update: {
-                type: Type.OBJECT,
-                description: "Auto-equip items from inventory if the user's action implies drawing/using them.",
-                properties: {
-                    equip: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    unequip: { type: Type.ARRAY, items: { type: Type.STRING } }
-                }
-            },
-            quest_update: { type: Type.STRING },
-            hp_change: { type: Type.INTEGER },
-            game_status: { type: Type.STRING, enum: ['ongoing', 'won', 'lost'] },
-            new_effects: {
-                type: Type.ARRAY,
-                description: "Add temporary buffs or debuffs based on narrative context.",
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING, description: "e.g. Concussed, Empowered" },
-                        description: { type: Type.STRING, description: "Short description of effect" },
-                        type: { type: Type.STRING, enum: ['buff', 'debuff'] },
-                        duration: { type: Type.INTEGER, description: "Number of turns this lasts (1-5)" },
-                        blocksHeroicActions: { type: Type.BOOLEAN, nullable: true },
-                        statModifiers: {
-                            type: Type.OBJECT,
-                            properties: {
-                                STR: { type: Type.INTEGER },
-                                DEX: { type: Type.INTEGER },
-                                CON: { type: Type.INTEGER },
-                                INT: { type: Type.INTEGER },
-                                CHA: { type: Type.INTEGER },
-                            }
-                        }
-                    },
-                    required: ["name", "type", "duration"]
-                }
-            },
-            npcs_update: {
-                type: Type.OBJECT,
-                properties: {
-                    add: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                description: { type: Type.STRING },
-                                type: { type: Type.STRING, enum: ['Friendly', 'Hostile', 'Neutral', 'Unknown'] },
-                                condition: { type: Type.STRING, enum: ['Healthy', 'Injured', 'Dying', 'Dead', 'Unknown', '???'] }
-                            },
-                            required: ["name", "type", "condition"]
-                        }
-                    },
-                    update: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                condition: { type: Type.STRING, enum: ['Healthy', 'Injured', 'Dying', 'Dead', 'Unknown', '???'] },
-                                status: { type: Type.STRING, nullable: true } // allow type change
-                            },
-                            required: ["name", "condition"]
-                        }
-                    },
-                    remove: { type: Type.ARRAY, items: { type: Type.STRING } }
-                }
-            },
-            action_result: {
-                type: Type.OBJECT,
-                description: "Required ONLY for Custom Actions: Return the calculated result of the action.",
-                properties: {
-                    stat: { type: Type.STRING, enum: ['STR', 'DEX', 'CON', 'INT', 'CHA'] },
-                    difficulty: { type: Type.INTEGER },
-                    base_roll: { type: Type.INTEGER },
-                    total: { type: Type.INTEGER },
-                    is_success: { type: Type.BOOLEAN }
-                },
-                nullable: true
-            }
-          },
-          required: ["narrative", "choices", "game_status"]
-        }
+        // No responseMimeType or responseSchema - we want plain text
       }
     });
 
@@ -341,7 +337,8 @@ export const generateStoryStep = async (
     if (!text) throw new Error("No response text from AI");
     
     debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: text });
-    return JSON.parse(text) as AIStoryResponse;
+    return parseTextResponse(text);
+
   } catch (error) {
     debugLog.addLog({ type: 'error', endpoint: 'generateStoryStep', model: modelName, content: error });
     console.error("Story generation failed:", error);

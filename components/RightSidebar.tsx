@@ -12,20 +12,14 @@ import {
   Skull,
   HelpCircle,
   Map as MapIcon,
-  MousePointer2,
-  Users,
-  Smile,
-  Frown,
-  Meh,
-  Ghost
+  MousePointer2
 } from 'lucide-react';
-import { InventoryItem, EquippedGear, ItemType, NPC } from '../types';
+import { InventoryItem, EquippedGear, ItemType } from '../types';
 
 interface RightSidebarProps {
   currentQuest: string;
   inventory: InventoryItem[];
   equipped: EquippedGear; 
-  npcs?: NPC[];
   isOpen: boolean;
   onEquip: (item: InventoryItem) => void;
   onUnequip: (item: InventoryItem) => void;
@@ -46,19 +40,10 @@ const getIconForItem = (name: string, type: ItemType) => {
   return <HelpCircle size={14} />;
 };
 
-const getNPCIcon = (type: string, condition: string) => {
-    if (condition === 'Dead') return <Skull size={14} className="text-zinc-600" />;
-    if (type === 'Hostile') return <Frown size={14} className="text-red-500" />;
-    if (type === 'Friendly') return <Smile size={14} className="text-emerald-500" />;
-    if (type === 'Unknown') return <Ghost size={14} className="text-purple-500" />;
-    return <Users size={14} className="text-zinc-400" />;
-};
-
 export const RightSidebar: React.FC<RightSidebarProps> = ({ 
   currentQuest, 
   inventory,
   equipped,
-  npcs = [],
   isOpen,
   onEquip,
   onUnequip
@@ -189,43 +174,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           )}
         </div>
 
-        {/* NPC / People Section */}
-        {npcs.length > 0 && (
-            <div className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
-                <h2 className="text-zinc-400 font-bold mb-3 flex items-center gap-2 cinzel text-xs uppercase tracking-widest">
-                    <Users size={14} />
-                    People & Creatures
-                </h2>
-                <div className="space-y-2">
-                    {npcs.map((npc) => (
-                        <div key={npc.id} className="flex items-center gap-3 bg-zinc-900 p-2 rounded border border-zinc-800/50">
-                            <div className="w-8 h-8 rounded-full bg-zinc-950 border border-zinc-800 flex items-center justify-center flex-shrink-0">
-                                {getNPCIcon(npc.type, npc.condition)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-center">
-                                    <span className={`text-xs font-bold ${npc.condition === 'Dead' ? 'text-zinc-600 line-through' : 'text-zinc-200'}`}>
-                                        {npc.name}
-                                    </span>
-                                    <span className={`text-[9px] font-mono px-1.5 rounded ${
-                                        npc.condition === 'Healthy' ? 'text-emerald-500 bg-emerald-900/10' :
-                                        npc.condition === 'Injured' ? 'text-amber-500 bg-amber-900/10' :
-                                        npc.condition === 'Dead' ? 'text-zinc-600 bg-zinc-900' :
-                                        'text-red-500 bg-red-900/10'
-                                    }`}>
-                                        {npc.condition}
-                                    </span>
-                                </div>
-                                <div className="text-[10px] text-zinc-500 truncate">
-                                    {npc.type}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        )}
-        
         <div className="text-[10px] text-zinc-800 text-center mt-auto opacity-50 hover:opacity-100 transition-opacity pb-2">
              Drag items to equip/unequip
         </div>

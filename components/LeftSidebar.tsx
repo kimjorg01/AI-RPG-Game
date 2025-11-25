@@ -11,7 +11,8 @@ import {
   Zap,
   Brain,
   Crown,
-  X
+  X,
+  Eye
 } from 'lucide-react';
 import { CharacterStats, InventoryItem, EquippedGear, ItemType, StatusEffect, StatType } from '../types';
 
@@ -42,6 +43,7 @@ const STAT_CONFIG: Record<keyof CharacterStats, { label: string, abbr: string, i
     CON: { label: "Constitution", abbr: "CON", icon: Shield, border: 'border-orange-900/50', text: 'text-orange-500', glow: 'border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.4)]' },
     INT: { label: "Intelligence", abbr: "INT", icon: Brain, border: 'border-blue-900/50', text: 'text-blue-500', glow: 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.4)]' },
     CHA: { label: "Charisma", abbr: "CHA", icon: Crown, border: 'border-purple-900/50', text: 'text-purple-500', glow: 'border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.4)]' },
+    PER: { label: "Perception", abbr: "PER", icon: Eye, border: 'border-teal-900/50', text: 'text-teal-500', glow: 'border-teal-500 shadow-[0_0_15px_rgba(20,184,166,0.4)]' },
 };
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({ 

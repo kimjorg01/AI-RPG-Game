@@ -11,12 +11,12 @@ import { MainMenu } from './components/MainMenu';
 import { GameOverScreen } from './components/GameOverScreen';
 import { CustomChoiceModal } from './components/CustomChoiceModal';
 import { DebugConsole } from './components/DebugConsole';
-import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale } from './types';
+import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, UIScale } from './types';
 import { generateStoryStep, generateGameSummary, generateStoryboard } from './services/gemini';
-import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle } from 'lucide-react';
+import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye } from 'lucide-react';
 
 const BASE_HP = 100;
-const DEFAULT_STATS = { STR: 10, DEX: 10, CON: 10, INT: 10, CHA: 10 };
+const DEFAULT_STATS = { STR: 10, DEX: 10, CON: 10, INT: 10, CHA: 10, PER: 10 };
 const EXP_THRESHOLD = 3;
 
 // Helper to determine risk visual properties
@@ -57,6 +57,7 @@ const getStatConfig = (stat: string) => {
     case 'CON': return { icon: Shield, color: 'text-orange-500', label: 'Constitution', borderHover: 'hover:border-orange-500', bgHover: 'hover:bg-orange-950/20' };
     case 'INT': return { icon: Brain, color: 'text-blue-500', label: 'Intelligence', borderHover: 'hover:border-blue-500', bgHover: 'hover:bg-blue-950/20' };
     case 'CHA': return { icon: Crown, color: 'text-purple-500', label: 'Charisma', borderHover: 'hover:border-purple-500', bgHover: 'hover:bg-purple-950/20' };
+    case 'PER': return { icon: Eye, color: 'text-teal-500', label: 'Perception', borderHover: 'hover:border-teal-500', bgHover: 'hover:bg-teal-950/20' };
     default: return { icon: Circle, color: 'text-zinc-400', label: 'Action', borderHover: 'hover:border-zinc-500', bgHover: 'hover:bg-zinc-900/50' };
   }
 };
@@ -67,7 +68,6 @@ const App: React.FC = () => {
     inventory: [],
     equipped: { weapon: null, armor: null, accessory: null },
     currentQuest: "",
-    npcs: [],
     history: [],
     isLoading: false,
     isRolling: false,
@@ -78,7 +78,7 @@ const App: React.FC = () => {
     phase: 'menu',
     genre: 'Fantasy',
     stats: DEFAULT_STATS,
-    statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0 },
+    statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0 },
     activeEffects: [],
     startingStats: DEFAULT_STATS,
     customChoicesRemaining: 3
@@ -143,6 +143,7 @@ const App: React.FC = () => {
           if (bonuses.CON) calculated.CON += bonuses.CON;
           if (bonuses.INT) calculated.INT += bonuses.INT;
           if (bonuses.CHA) calculated.CHA += bonuses.CHA;
+          if (bonuses.PER) calculated.PER += bonuses.PER;
       };
 
       applyBonus(equipped.weapon?.bonuses);
@@ -231,7 +232,6 @@ const App: React.FC = () => {
         phase: 'setup_genre',
         history: [], 
         inventory: [],
-        npcs: [],
         equipped: { weapon: null, armor: null, accessory: null },
         hpHistory: [BASE_HP],
         statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0 },
@@ -394,7 +394,6 @@ const App: React.FC = () => {
       gameState.hp,
       currentStats,
       decrementedEffects,
-      gameState.npcs,
       gameState.genre,
       rollResult,
       customAction,
@@ -493,29 +492,6 @@ const App: React.FC = () => {
         
         const finalActiveEffects = [...prev.activeEffects, ...brandNewEffects];
 
-        // Process NPCs
-        let currentNPCs = [...prev.npcs];
-        const npcAdd = aiResponse.npcs_update?.add || [];
-        const npcUpdate = aiResponse.npcs_update?.update || [];
-        const npcRemove = aiResponse.npcs_update?.remove || [];
-
-        npcAdd.forEach(n => {
-            currentNPCs.push({ ...n, id: Math.random().toString(36).substr(2, 9) } as NPC);
-        });
-
-        npcUpdate.forEach(u => {
-            const index = currentNPCs.findIndex(n => n.name.toLowerCase() === u.name.toLowerCase());
-            if (index !== -1) {
-                currentNPCs[index] = { 
-                    ...currentNPCs[index], 
-                    condition: u.condition as any,
-                    type: u.status ? u.status as any : currentNPCs[index].type
-                };
-            }
-        });
-
-        currentNPCs = currentNPCs.filter(n => !npcRemove.includes(n.name));
-
         let customActionLevelUp: LevelUpEvent | undefined = undefined;
         let customActionRollResult: RollResult | undefined = undefined;
 
@@ -558,7 +534,6 @@ const App: React.FC = () => {
             newEffects: brandNewEffects.length > 0 ? brandNewEffects : undefined,
             rollResult: customActionRollResult,
             levelUpEvent: customActionLevelUp,
-            npcUpdates: npcAdd 
         };
 
         return {
@@ -568,7 +543,6 @@ const App: React.FC = () => {
             equipped: equippedUpdated ? newEquipped : prev.equipped,
             activeEffects: finalActiveEffects,
             currentQuest: aiResponse.quest_update || prev.currentQuest,
-            npcs: currentNPCs,
             isLoading: false,
             hp: newHp,
             hpHistory: [...prev.hpHistory, newHp],
@@ -587,7 +561,6 @@ const App: React.FC = () => {
         inventory: [],
         equipped: { weapon: null, armor: null, accessory: null },
         currentQuest: "",
-        npcs: [],
         history: [],
         isLoading: false,
         isRolling: false,
@@ -642,7 +615,6 @@ const App: React.FC = () => {
             
             setGameState(prev => ({
                 ...data.gameState,
-                npcs: data.gameState.npcs || [],
                 finalStoryboard: data.gameState.finalStoryboard
             }));
             setCurrentChoices(data.currentChoices);
@@ -908,7 +880,6 @@ const App: React.FC = () => {
             currentQuest={gameState.currentQuest}
             inventory={gameState.inventory}
             equipped={gameState.equipped}
-            npcs={gameState.npcs}
             isOpen={showRightSidebar}
             onEquip={handleEquip}
             onUnequip={handleUnequip}

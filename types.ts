@@ -1,5 +1,5 @@
 
-export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA';
+export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA' | 'PER';
 export type ItemType = 'weapon' | 'armor' | 'accessory' | 'misc';
 
 export interface CharacterStats {
@@ -8,6 +8,7 @@ export interface CharacterStats {
   CON: number;
   INT: number;
   CHA: number;
+  PER: number;
 }
 
 export type StatExperience = Record<StatType, number>;
@@ -43,14 +44,6 @@ export interface StatusEffect {
   blocksHeroicActions?: boolean;
 }
 
-export interface NPC {
-  id: string;
-  name: string;
-  description: string;
-  type: 'Friendly' | 'Hostile' | 'Neutral' | 'Unknown';
-  condition: 'Healthy' | 'Injured' | 'Dying' | 'Dead' | 'Unknown' | '???';
-}
-
 export type GameStatus = 'ongoing' | 'won' | 'lost';
 export type GamePhase = 'menu' | 'setup_genre' | 'setup_stats' | 'playing' | 'game_over';
 
@@ -73,7 +66,6 @@ export interface GameState {
   inventory: InventoryItem[];
   equipped: EquippedGear;
   currentQuest: string;
-  npcs: NPC[]; // New NPC list
   history: StoryTurn[];
   isLoading: boolean;
   isRolling: boolean;
@@ -105,7 +97,6 @@ export interface StoryTurn {
   inventoryAdded?: InventoryItem[];
   inventoryRemoved?: string[];
   newEffects?: StatusEffect[];
-  npcUpdates?: NPC[]; // Visual notification
 }
 
 export interface AIStoryResponse {
@@ -127,11 +118,6 @@ export interface AIStoryResponse {
   hp_change?: number;
   game_status?: GameStatus;
   new_effects?: StatusEffect[];
-  npcs_update?: {
-      add?: NPC[];
-      update?: { name: string, condition: string, status?: string }[];
-      remove?: string[]; // Remove by name
-  };
   action_result?: { // For Custom Choices
       stat: StatType;
       difficulty: number;

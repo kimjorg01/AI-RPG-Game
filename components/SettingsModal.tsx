@@ -102,37 +102,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
              <h3 className="font-bold text-zinc-200 text-sm uppercase tracking-wider mb-2 flex items-center gap-2">
                  <Monitor size={16} /> Interface Size
              </h3>
-             <div className="grid grid-cols-3 gap-2">
-                 <button
-                    onClick={() => onUpdateSettings({ ...settings, uiScale: UIScale.Compact })}
-                    className={`p-2 text-sm rounded border transition-all ${
-                        settings.uiScale === UIScale.Compact
-                        ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
-                        : 'bg-zinc-800 border-zinc-700 text-zinc-400'
-                    }`}
-                 >
-                     Compact
-                 </button>
-                 <button
-                    onClick={() => onUpdateSettings({ ...settings, uiScale: UIScale.Normal })}
-                    className={`p-2 text-sm rounded border transition-all ${
-                        settings.uiScale === UIScale.Normal
-                        ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
-                        : 'bg-zinc-800 border-zinc-700 text-zinc-400'
-                    }`}
-                 >
-                     Normal
-                 </button>
-                 <button
-                    onClick={() => onUpdateSettings({ ...settings, uiScale: UIScale.Large })}
-                    className={`p-2 text-sm rounded border transition-all ${
-                        settings.uiScale === UIScale.Large
-                        ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
-                        : 'bg-zinc-800 border-zinc-700 text-zinc-400'
-                    }`}
-                 >
-                     Large
-                 </button>
+             <div className="flex items-center gap-4">
+                 <ZoomIn size={16} className="text-zinc-500" />
+                 <input 
+                    type="range" 
+                    min="0.5" 
+                    max="1.5" 
+                    step="0.05"
+                    value={settings.uiScale || 1}
+                    onChange={(e) => onUpdateSettings({ ...settings, uiScale: parseFloat(e.target.value) })}
+                    className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                 />
+                 <span className="text-xs font-mono text-zinc-400 w-12 text-right">
+                     {Math.round((settings.uiScale || 1) * 100)}%
+                 </span>
+             </div>
+             <div className="flex justify-between text-[10px] text-zinc-600 mt-1 px-1">
+                 <span>Tiny</span>
+                 <span>Normal</span>
+                 <span>Huge</span>
              </div>
           </div>
 

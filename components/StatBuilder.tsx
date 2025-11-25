@@ -12,7 +12,8 @@ const STAT_LABELS: Record<keyof CharacterStats, string> = {
   DEX: "Dexterity",
   CON: "Constitution",
   INT: "Intelligence",
-  CHA: "Charisma"
+  CHA: "Charisma",
+  PER: "Perception"
 };
 
 const STAT_DESC: Record<keyof CharacterStats, string> = {
@@ -20,7 +21,8 @@ const STAT_DESC: Record<keyof CharacterStats, string> = {
   DEX: "Agility, stealth, reflexes, and ranged attacks.",
   CON: "Health, stamina, and resistance to injury.",
   INT: "Knowledge, reasoning, magic, and investigation.",
-  CHA: "Persuasion, deception, intimidation, and leadership."
+  CHA: "Persuasion, deception, intimidation, and leadership.",
+  PER: "Awareness, intuition, and noticing hidden details."
 };
 
 export const StatBuilder: React.FC<StatBuilderProps> = ({ onComplete }) => {
@@ -33,9 +35,10 @@ export const StatBuilder: React.FC<StatBuilderProps> = ({ onComplete }) => {
     CON: 10 + Math.floor(Math.random() * 4) - 1,
     INT: 10 + Math.floor(Math.random() * 4) - 1,
     CHA: 10 + Math.floor(Math.random() * 4) - 1,
+    PER: 10 + Math.floor(Math.random() * 4) - 1,
   }));
   
-  const [allocated, setAllocated] = useState<CharacterStats>({ STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0 });
+  const [allocated, setAllocated] = useState<CharacterStats>({ STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0 });
 
   const getTotal = (key: keyof CharacterStats) => baseStats[key] + allocated[key];
   
@@ -119,6 +122,7 @@ export const StatBuilder: React.FC<StatBuilderProps> = ({ onComplete }) => {
             CON: getTotal('CON'),
             INT: getTotal('INT'),
             CHA: getTotal('CHA'),
+            PER: getTotal('PER'),
           })}
           className="flex items-center gap-3 px-8 py-4 bg-amber-700 hover:bg-amber-600 text-white rounded-lg font-bold cinzel text-lg shadow-lg shadow-amber-900/20 transition-all hover:scale-105"
         >
