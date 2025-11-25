@@ -1,0 +1,5 @@
+{
+  "name": "Working RPG AI Game",
+  "description": "An infinite choose-your-own-adventure game with dynamic inventory, quest tracking, and real-time AI-generated illustrations.",
+  "requestFramePermissions": []
+}
