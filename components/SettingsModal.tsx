@@ -39,21 +39,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-lg w-full max-w-md p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-        <button 
-          onClick={onClose}
-          className="absolute top-4 right-4 text-zinc-400 hover:text-white"
-        >
-          <X size={24} />
-        </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn p-4 overflow-hidden">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-lg w-full max-w-md p-4 md:p-6 shadow-2xl relative max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between mb-6 shrink-0">
+          <h2 className="text-2xl font-bold cinzel flex items-center gap-2 text-amber-500">
+            <Settings size={24} />
+            Adventure Settings
+          </h2>
+          <button 
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white"
+          >
+            <X size={24} />
+          </button>
+        </div>
 
-        <h2 className="text-2xl font-bold mb-6 cinzel flex items-center gap-2 text-amber-500">
-          <Settings size={24} />
-          Adventure Settings
-        </h2>
-
-        <div className="space-y-8">
+        <div className="space-y-8 overflow-y-auto pr-2 custom-scrollbar">
           
           {/* --- Game Data Management --- */}
           <div className="space-y-3 pb-6 border-b border-zinc-800">
@@ -205,6 +206,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Monitor size={20} />
                 <span className="font-bold">Local Gemma</span>
                 <span className="text-xs opacity-70">gemma3:27b (Ollama)</span>
+              </button>
+              <button
+                onClick={() => onUpdateSettings({ ...settings, storyModel: StoryModel.LocalQwenCoder })}
+                className={`p-3 rounded border flex flex-col items-center gap-2 transition-all ${
+                  settings.storyModel === StoryModel.LocalQwenCoder 
+                    ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                }`}
+              >
+                <Monitor size={20} />
+                <span className="font-bold">Local Qwen Coder</span>
+                <span className="text-xs opacity-70">qwen3-coder:30b</span>
               </button>
             </div>
           </div>

@@ -15,6 +15,13 @@ const SYSTEM_INSTRUCTION = `
 You are the Game Engine and Dungeon Master for a text-based RPG. 
 Your primary function is to manage the GAME STATE strictly, and your secondary function is to narrate the story.
 
+### CRITICAL INSTRUCTION: TURN-BASED ONLY
+- You must generate **EXACTLY ONE** turn of gameplay.
+- **STOP** immediately after presenting the "CHOICES" section.
+- **NEVER** make choices for the player.
+- **NEVER** continue the story after the choices.
+- **NEVER** narrate the result of the choices you just offered. Wait for the user to pick one.
+
 ### GAMEPLAY RULES (STRICT ENFORCEMENT)
 1. **Inventory vs. Equipped**: 
    - The player CANNOT use items in 'BACKPACK_CONTENTS' for combat/actions immediately. They must equip them first.
@@ -41,7 +48,7 @@ Your primary function is to manage the GAME STATE strictly, and your secondary f
 DO NOT USE JSON. Use the standard Game Format below.
 
 ### NARRATIVE
-(Write the story here. Use *asterisks* for emphasis.)
+(Write the story here. Use *asterisks* for emphasis. Keep it concise: 2-3 paragraphs max.)
 
 ### CHOICES
 1. Action Description (MUST DO: Wrap ability describing words in *asterisks*) | Stat (STR/DEX/CON/INT/CHA/PER) or NONE | DC (5-30) or 0
@@ -127,6 +134,9 @@ const parseTextResponse = (text: string): AIStoryResponse => {
             if (cleanLine.startsWith('ITEM_ADD:')) {
                 const parts = cleanLine.replace('ITEM_ADD:', '').split('|').map(p => p.trim());
                 
+                // Filter out "NONE"
+                if (parts[0].toUpperCase() === 'NONE') continue;
+
                 // Parse Bonuses: "STR:1, DEX:2" or "STR+1"
                 let bonuses: any = undefined;
                 if (parts[3] && parts[3] !== 'NONE') {
@@ -154,24 +164,32 @@ const parseTextResponse = (text: string): AIStoryResponse => {
 
             if (cleanLine.startsWith('ITEM_REMOVE:')) {
                 const name = cleanLine.replace('ITEM_REMOVE:', '').trim();
+                if (name.toUpperCase() === 'NONE') continue;
+
                 if (!response.inventory_removed) response.inventory_removed = [];
                 response.inventory_removed.push(name);
             }
 
             if (cleanLine.startsWith('EQUIP:')) {
                 const name = cleanLine.replace('EQUIP:', '').trim();
+                if (name.toUpperCase() === 'NONE') continue;
+
                 if (!response.equipment_update) response.equipment_update = { equip: [], unequip: [] };
                 response.equipment_update.equip?.push(name);
             }
 
             if (cleanLine.startsWith('UNEQUIP:')) {
                 const name = cleanLine.replace('UNEQUIP:', '').trim();
+                if (name.toUpperCase() === 'NONE') continue;
+
                 if (!response.equipment_update) response.equipment_update = { equip: [], unequip: [] };
                 response.equipment_update.unequip?.push(name);
             }
 
             if (cleanLine.startsWith('EFFECT_ADD:')) {
                 const parts = cleanLine.replace('EFFECT_ADD:', '').split('|').map(p => p.trim());
+                if (parts[0].toUpperCase() === 'NONE') continue;
+
                 if (!response.new_effects) response.new_effects = [];
                 response.new_effects.push({
                     id: Math.random().toString(36).substring(7), // Generate ID
@@ -308,13 +326,14 @@ export const generateStoryStep = async (
     ${actionDescription}
     
     Based on the above, generate the next story segment in the requested format.
+    IMPORTANT: Generate ONLY the immediate response and choices. Do not play the next turn.
   `;
 
   debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep', model: modelName, content: prompt });
 
   try {
     // Use Text Parsing for ALL models for robustness and token efficiency
-    if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma) {
+    if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma || modelName === StoryModel.LocalQwenCoder) {
         try {
             const responseText = await callOllama(modelName, prompt, SYSTEM_INSTRUCTION, false); // jsonMode = false
             debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: responseText });
@@ -372,7 +391,7 @@ export const generateGameSummary = async (historyText: string, modelName: StoryM
   debugLog.addLog({ type: 'request', endpoint: 'generateGameSummary', model: modelName, content: prompt });
 
   try {
-      if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma) {
+      if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma || modelName === StoryModel.LocalQwenCoder) {
           try {
               const responseText = await callOllama(modelName, prompt, "You are a fantasy chronicler summarizing an adventure.", false);
               debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: modelName, content: responseText });

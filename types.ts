@@ -138,6 +138,7 @@ export enum StoryModel {
   Fast = "gemini-2.5-flash",
   LocalQwen = "qwen3:8b",
   LocalGemma = "gemma3:27b",
+  LocalQwenCoder = "qwen3-coder:30b",
 }
 
 export enum UIScale {
