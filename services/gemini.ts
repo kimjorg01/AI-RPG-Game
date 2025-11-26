@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect } from "../types";
 import { debugLog } from "./debugLog";
@@ -11,66 +10,279 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey: apiKey });
 };
 
-const SYSTEM_INSTRUCTION = `
-You are the Game Engine and Dungeon Master for a text-based RPG. 
-Your primary function is to manage the GAME STATE strictly, and your secondary function is to narrate the story.
+const AUTHOR_SYSTEM = `
+You are a Fantasy Author. 
+Your task is to write the next segment of the story based on the user's action.
+- Focus on description, dialogue, and action.
+- Be concise (2-3 paragraphs).
+- Use *asterisks* for emphasis.
+- Do NOT mention game mechanics like HP, stats, or dice rolls explicitly (e.g. don't say "You take 5 damage", say "The blow staggers you").
+- Do NOT provide choices.
+- Do NOT decide the outcome of future actions.
+`;
 
-### CRITICAL INSTRUCTION: TURN-BASED ONLY
-- You must generate **EXACTLY ONE** turn of gameplay.
-- **STOP** immediately after presenting the "CHOICES" section.
-- **NEVER** make choices for the player.
-- **NEVER** continue the story after the choices.
-- **NEVER** narrate the result of the choices you just offered. Wait for the user to pick one.
-
-### GAMEPLAY RULES (STRICT ENFORCEMENT)
-1. **Inventory vs. Equipped**: 
-   - The player CANNOT use items in 'BACKPACK_CONTENTS' for combat/actions immediately. They must equip them first.
-   - If the player tries to shoot a gun but only has a sword EQUIPPED, they effectively throw the sword or fail.
-   - **Auto-Equip**: If the player says "I draw my Pistol" and they have one in the Backpack, use the 'equipment_update' field to equip it.
-
-2. **Game Balance & Loot**:
-   - Do NOT hand out "Legendary" items early. Keep bonuses small (+1 to +3).
-   - Use the 'inventory_added' field for new items. Do NOT just mention them in text.
-   - **Stat Generation**: Only assign bonuses if logically consistent (e.g., Heavy Armor reduces DEX, increases CON).
-
-3. **Action Resolution (Dice Rolls)**:
-   - **Standard Choices**: The outcome is already decided by the provided 'rollResult'. NARRATE the success or failure matching that result.
-   - **Custom Actions**: 
-     1. Analyze the action's difficulty (DC 5=Easy, 15=Hard, 25=Impossible) based *only* on the narrative situation.
-     2. *Then* compare with the provided 'customAction.roll' + Stat Mod.
-     3. If Roll < DC, they FAIL. Do not be lenient. Failures make the story interesting.
-
-4. **Status Effects**:
-   - If the player takes massive damage or hits a trap, apply a 'new_effect' (e.g., "Concussed", "Bleeding").
-   - Effects should have mechanical consequences (statModifiers).
-
-### OUTPUT FORMAT
-DO NOT USE JSON. Use the standard Game Format below.
-
-### NARRATIVE
-(Write the story here. Use *asterisks* for emphasis. Keep it concise: 2-3 paragraphs max.)
-
-### CHOICES
-1. Action Description (MUST DO: Wrap ability describing words in *asterisks*) | Stat (STR/DEX/CON/INT/CHA/PER) or NONE | DC (5-30) or 0
-2. Action Description | Stat | DC
+const DESIGNER_SYSTEM = `
+You are a Game Systems Designer.
+Your task is to analyze the provided story narrative and determine the mechanical changes.
+Output ONLY the UPDATES section in the following format:
 
 ### UPDATES
 HP: [Number, e.g. -5, +2, 0]
 STATUS: [ongoing, won, lost]
 QUEST: [New objective or SAME]
-ITEM_ADD: [Name] | [Type (weapon/armor/accessory/misc)] | [Description] | [Bonuses (e.g. STR:1, PER:2) or NONE]
+ITEM_ADD: [Name] | [Type] | [Description] | [Bonuses]
 ITEM_REMOVE: [Name]
 EQUIP: [Name]
 UNEQUIP: [Name]
-EFFECT_ADD: [Name] | [buff/debuff] | [Duration (turns)]
+EFFECT_ADD: [Name] | [buff/debuff] | [Duration]
 
-### ACTION_RESULT (Only for Custom Actions)
-STAT: [Stat]
-DC: [Number]
-BASE: [Number]
-TOTAL: [Number]
-SUCCESS: [true/false]
+Rules:
+- If the story implies damage, reduce HP.
+- If the story implies death, set STATUS: lost.
+- If the story implies victory, set STATUS: won.
+- If the story mentions finding an item, use ITEM_ADD.
+- If the story mentions using/losing an item, use ITEM_REMOVE.
 `;
+
+const DM_SYSTEM = `
+You are a Dungeon Master.
+Your task is to read the story narrative and the game updates, then offer 3 distinct choices for the player.
+Output ONLY the CHOICES section in the following format:
+
+### CHOICES
+1. Action Description (Wrap ability words in *asterisks*) | Stat (STR/DEX/CON/INT/CHA/PER) or NONE | DC (5-30) or 0
+2. Action Description | Stat | DC
+3. Action Description | Stat | DC
+
+Rules:
+- Choices should be relevant to the current situation.
+- Include a mix of combat, social, and exploration options if applicable.
+- Assign appropriate Stats and Difficulty Classes (DC).
+`;
+
+const callAI = async (modelName: string, prompt: string, systemInstruction: string): Promise<string> => {
+    const isLocal = modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma || modelName === StoryModel.LocalQwenCoder;
+    
+    if (isLocal) {
+        return await callOllama(modelName, prompt, systemInstruction, false);
+    } else {
+        const ai = getAIClient();
+        const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: { systemInstruction }
+        });
+        return response.text || "";
+    }
+};
+
+export const generateStoryStep = async (
+  previousHistory: string,
+  userChoice: string,
+  currentInventory: InventoryItem[],
+  equipped: EquippedGear,
+  currentQuest: string,
+  currentHp: number,
+  stats: CharacterStats,
+  activeEffects: StatusEffect[],
+  genre: string,
+  rollResult: RollResult | null,
+  customAction: { text: string, item: string, roll: number } | null,
+  modelName: StoryModel = StoryModel.Smart
+): Promise<AIStoryResponse> => {
+  
+  let actionDescription = "";
+
+  if (customAction) {
+      actionDescription = `
+      User performs a HEROIC CUSTOM ACTION: "${customAction.text}"
+      User claims to be using Item: ${customAction.item || "None"} (VERIFY this is equipped/owned before allowing bonuses).
+      
+      [INTERNAL RESOLUTION REQUIRED]
+      1. Choose the most relevant STAT for this action.
+      2. Set a DC (5 = Easy, 15 = Hard, 25 = Impossible).
+      3. Use the RAW DIE ROLL provided: ${customAction.roll}
+      4. Calculate: Total = ${customAction.roll} + (Stat Modifier).
+      5. Narrate the outcome and populate the 'action_result' field in JSON.
+      `;
+  } else {
+      actionDescription = `User's Latest Choice: "${userChoice}"`;
+      if (rollResult) {
+        actionDescription += `
+        \n[ACTION RESOLUTION]
+        - Skill Check: ${rollResult.statType}
+        - Difficulty Class (DC): ${rollResult.difficulty}
+        - Calculation: Roll(${rollResult.base}) + Mod(${rollResult.modifier}) = Total(${rollResult.total})
+        - Result: ${rollResult.isSuccess ? "SUCCESS" : "FAILURE"}
+        `;
+      }
+  }
+
+  const inventoryNames = currentInventory.map(i => i.name);
+  const equippedString = formatEquipped(equipped);
+
+  // --- STEP 1: THE AUTHOR ---
+  const authorPrompt = `
+    [GAME CONTEXT]
+    Genre: ${genre}
+    Quest: "${currentQuest}"
+    Current HP: ${currentHp}
+    
+    [RECENT HISTORY]
+    ${previousHistory}
+    
+    [PLAYER ACTION]
+    ${actionDescription}
+    
+    Write the next segment of the story.
+  `;
+
+  debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep_Author', model: modelName, content: authorPrompt });
+
+  let narrative = "";
+  try {
+      narrative = await callAI(modelName, authorPrompt, AUTHOR_SYSTEM);
+      debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep_Author', model: modelName, content: narrative });
+  } catch (error) {
+      console.error("Author Agent failed:", error);
+      return { narrative: "The storyteller is silent...", choices: [{ text: "Try again" }], hp_change: 0, game_status: 'ongoing' };
+  }
+
+  // --- STEP 2: THE GAME DESIGNER ---
+  const designerPrompt = `
+    [CURRENT STATE]
+    HP: ${currentHp} / ${stats.CON * 10 + 100}
+    Inventory: ${JSON.stringify(inventoryNames)}
+    Equipped: ${equippedString}
+    
+    [NEW STORY SEGMENT]
+    ${narrative}
+    
+    Analyze the story and output the UPDATES section.
+  `;
+
+  debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep_Designer', model: modelName, content: designerPrompt });
+
+  let updates = "";
+  try {
+      updates = await callAI(modelName, designerPrompt, DESIGNER_SYSTEM);
+      debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep_Designer', model: modelName, content: updates });
+  } catch (error) {
+      console.error("Designer Agent failed:", error);
+      // Continue without updates if designer fails
+  }
+
+  // --- STEP 3: THE DUNGEON MASTER ---
+  const dmPrompt = `
+    [STORY SO FAR]
+    ${narrative}
+    
+    [GAME UPDATES]
+    ${updates}
+    
+    [PLAYER STATS]
+    STR:${stats.STR} DEX:${stats.DEX} CON:${stats.CON} INT:${stats.INT} CHA:${stats.CHA} PER:${stats.PER}
+    
+    Offer 3 choices for the player.
+  `;
+
+  debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep_DM', model: modelName, content: dmPrompt });
+
+  let choices = "";
+  try {
+      choices = await callAI(modelName, dmPrompt, DM_SYSTEM);
+      debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep_DM', model: modelName, content: choices });
+  } catch (error) {
+      console.error("DM Agent failed:", error);
+      choices = "### CHOICES\n1. Continue... | NONE | 0";
+  }
+
+  // Combine and Parse
+  const fullResponseText = `### NARRATIVE\n${narrative}\n\n${updates}\n\n${choices}`;
+  return parseTextResponse(fullResponseText);
+};
+
+export const generateGameSummary = async (historyText: string, modelName: StoryModel = StoryModel.Fast): Promise<string> => {
+  const ai = getAIClient();
+  const prompt = `
+  Read the following adventure log and write a concise, engaging summary (3-5 sentences) of the entire journey. 
+  Highlight the key conflicts, major decisions, and how it ended.
+  
+  LOG:
+  ${historyText}
+  `;
+  
+  debugLog.addLog({ type: 'request', endpoint: 'generateGameSummary', model: modelName, content: prompt });
+
+  try {
+      if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma || modelName === StoryModel.LocalQwenCoder) {
+          try {
+              const responseText = await callOllama(modelName, prompt, "You are a fantasy chronicler summarizing an adventure.", false);
+              debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: modelName, content: responseText });
+              return responseText;
+          } catch (e) {
+             debugLog.addLog({ type: 'error', endpoint: 'generateGameSummary', model: modelName, content: e });
+             console.error("Local summary failed", e);
+             return "Summary unavailable (Local LLM Error).";
+          }
+      }
+
+      const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt
+      });
+      const text = response.text || "The tale is lost to the void.";
+      debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: 'gemini-2.5-flash', content: text });
+      return text;
+  } catch(e) {
+      debugLog.addLog({ type: 'error', endpoint: 'generateGameSummary', model: 'gemini-2.5-flash', content: e });
+      console.error(e);
+      return "Summary unavailable.";
+  }
+};
+
+export const generateStoryboard = async (summary: string): Promise<string | null> => {
+    const ai = getAIClient();
+    // High quality image model for the final reward
+    const prompt = `
+    Create a single high-quality image that looks like a comic book page or storyboard.
+    It should contain exactly 10 distinct panels arranged in a grid.
+    Style: Half-cartoon, vibrant, detailed, expressive fantasy art.
+    Content: Visualize the following story summary in chronological order across the panels:
+    
+    "${summary}"
+    
+    Make it look epic and cohesive.
+    `;
+
+    debugLog.addLog({ type: 'request', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: prompt });
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-image-preview',
+            contents: { parts: [{ text: prompt }] },
+            config: {
+                imageConfig: {
+                    aspectRatio: "16:9",
+                    imageSize: ImageSize.Size_2K 
+                }
+            }
+        });
+
+        debugLog.addLog({ type: 'response', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: response });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            }
+        }
+        return null;
+    } catch (e) {
+        debugLog.addLog({ type: 'error', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: e });
+        console.error("Storyboard generation failed", e);
+        return null;
+    }
+};
 
 const parseTextResponse = (text: string): AIStoryResponse => {
     const sections: Record<string, string> = {};
@@ -257,205 +469,4 @@ const callOllama = async (model: string, prompt: string, systemInstruction: stri
     console.error("Ollama call failed:", error);
     throw error;
   }
-};
-
-export const generateStoryStep = async (
-  previousHistory: string,
-  userChoice: string,
-  currentInventory: InventoryItem[],
-  equipped: EquippedGear,
-  currentQuest: string,
-  currentHp: number,
-  stats: CharacterStats,
-  activeEffects: StatusEffect[],
-  genre: string,
-  rollResult: RollResult | null,
-  customAction: { text: string, item: string, roll: number } | null,
-  modelName: StoryModel = StoryModel.Smart
-): Promise<AIStoryResponse> => {
-  const ai = getAIClient();
-  
-  let actionDescription = "";
-
-  if (customAction) {
-      actionDescription = `
-      User performs a HEROIC CUSTOM ACTION: "${customAction.text}"
-      User claims to be using Item: ${customAction.item || "None"} (VERIFY this is equipped/owned before allowing bonuses).
-      
-      [INTERNAL RESOLUTION REQUIRED]
-      1. Choose the most relevant STAT for this action.
-      2. Set a DC (5 = Easy, 15 = Hard, 25 = Impossible).
-      3. Use the RAW DIE ROLL provided: ${customAction.roll}
-      4. Calculate: Total = ${customAction.roll} + (Stat Modifier).
-      5. Narrate the outcome and populate the 'action_result' field in JSON.
-      `;
-  } else {
-      actionDescription = `User's Latest Choice: "${userChoice}"`;
-      if (rollResult) {
-        actionDescription += `
-        \n[ACTION RESOLUTION]
-        - Skill Check: ${rollResult.statType}
-        - Difficulty Class (DC): ${rollResult.difficulty}
-        - Calculation: Roll(${rollResult.base}) + Mod(${rollResult.modifier}) = Total(${rollResult.total})
-        - Result: ${rollResult.isSuccess ? "SUCCESS" : "FAILURE"}
-        
-        (Narrate the outcome based on this result. If it was a failure on a dangerous action, reduce HP or BREAK equipped item).
-        `;
-      }
-  }
-
-  const inventoryNames = currentInventory.map(i => i.name);
-  const equippedString = formatEquipped(equipped);
-
-  const prompt = `
-    [GAME STATE]
-    Genre: ${genre}
-    Health: ${currentHp} / ${stats.CON * 10 + 100}
-    Quest: "${currentQuest}"
-    
-    [EQUIPPED_GEAR (ACTIVE)]
-    ${equippedString}
-    
-    [BACKPACK_CONTENTS (INACTIVE - Must Equip to Use)]
-    ${JSON.stringify(inventoryNames)}
-    
-    [RECENT_HISTORY]
-    ${previousHistory}
-    
-    [PLAYER_ACTION]
-    ${actionDescription}
-    
-    Based on the above, generate the next story segment in the requested format.
-    IMPORTANT: Generate ONLY the immediate response and choices. Do not play the next turn.
-  `;
-
-  debugLog.addLog({ type: 'request', endpoint: 'generateStoryStep', model: modelName, content: prompt });
-
-  try {
-    // Use Text Parsing for ALL models for robustness and token efficiency
-    if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma || modelName === StoryModel.LocalQwenCoder) {
-        try {
-            const responseText = await callOllama(modelName, prompt, SYSTEM_INSTRUCTION, false); // jsonMode = false
-            debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: responseText });
-            return parseTextResponse(responseText);
-        } catch (error) {
-            debugLog.addLog({ type: 'error', endpoint: 'generateStoryStep', model: modelName, content: error });
-            console.error("Local LLM generation failed:", error);
-            return {
-                narrative: "The local spirits are silent... (Ollama Error: Ensure Ollama is running and the model is pulled)",
-                choices: [{ text: "Try again" }],
-                hp_change: 0,
-                game_status: 'ongoing'
-            };
-        }
-    }
-
-    // For Gemini, we also use the text format now
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        // No responseMimeType or responseSchema - we want plain text
-      }
-    });
-
-    const text = response.text;
-    if (!text) throw new Error("No response text from AI");
-    
-    debugLog.addLog({ type: 'response', endpoint: 'generateStoryStep', model: modelName, content: text });
-    return parseTextResponse(text);
-
-  } catch (error) {
-    debugLog.addLog({ type: 'error', endpoint: 'generateStoryStep', model: modelName, content: error });
-    console.error("Story generation failed:", error);
-    return {
-      narrative: "The mists of time obscure the path forward... (AI Error, please try again)",
-      choices: [{ text: "Attempt to reconnect with reality" }],
-      hp_change: 0,
-      game_status: 'ongoing'
-    };
-  }
-};
-
-export const generateGameSummary = async (historyText: string, modelName: StoryModel = StoryModel.Fast): Promise<string> => {
-  const ai = getAIClient();
-  const prompt = `
-  Read the following adventure log and write a concise, engaging summary (3-5 sentences) of the entire journey. 
-  Highlight the key conflicts, major decisions, and how it ended.
-  
-  LOG:
-  ${historyText}
-  `;
-  
-  debugLog.addLog({ type: 'request', endpoint: 'generateGameSummary', model: modelName, content: prompt });
-
-  try {
-      if (modelName === StoryModel.LocalQwen || modelName === StoryModel.LocalGemma || modelName === StoryModel.LocalQwenCoder) {
-          try {
-              const responseText = await callOllama(modelName, prompt, "You are a fantasy chronicler summarizing an adventure.", false);
-              debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: modelName, content: responseText });
-              return responseText;
-          } catch (e) {
-             debugLog.addLog({ type: 'error', endpoint: 'generateGameSummary', model: modelName, content: e });
-             console.error("Local summary failed", e);
-             return "Summary unavailable (Local LLM Error).";
-          }
-      }
-
-      const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt
-      });
-      const text = response.text || "The tale is lost to the void.";
-      debugLog.addLog({ type: 'response', endpoint: 'generateGameSummary', model: 'gemini-2.5-flash', content: text });
-      return text;
-  } catch(e) {
-      debugLog.addLog({ type: 'error', endpoint: 'generateGameSummary', model: 'gemini-2.5-flash', content: e });
-      console.error(e);
-      return "Summary unavailable.";
-  }
-};
-
-export const generateStoryboard = async (summary: string): Promise<string | null> => {
-    const ai = getAIClient();
-    // High quality image model for the final reward
-    const prompt = `
-    Create a single high-quality image that looks like a comic book page or storyboard.
-    It should contain exactly 10 distinct panels arranged in a grid.
-    Style: Half-cartoon, vibrant, detailed, expressive fantasy art.
-    Content: Visualize the following story summary in chronological order across the panels:
-    
-    "${summary}"
-    
-    Make it look epic and cohesive.
-    `;
-
-    debugLog.addLog({ type: 'request', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: prompt });
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-image-preview',
-            contents: { parts: [{ text: prompt }] },
-            config: {
-                imageConfig: {
-                    aspectRatio: "16:9",
-                    imageSize: ImageSize.Size_2K 
-                }
-            }
-        });
-
-        debugLog.addLog({ type: 'response', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: response });
-
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            }
-        }
-        return null;
-    } catch (e) {
-        debugLog.addLog({ type: 'error', endpoint: 'generateStoryboard', model: 'gemini-3-pro-image-preview', content: e });
-        console.error("Storyboard generation failed", e);
-        return null;
-    }
 };
