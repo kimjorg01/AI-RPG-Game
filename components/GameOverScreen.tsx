@@ -14,6 +14,7 @@ interface GameOverScreenProps {
   storyboardUrl: string | undefined;
   onDownloadLog: () => void;
   onRestart: () => void;
+  onRegenerateImage: () => void;
 }
 
 export const GameOverScreen: React.FC<GameOverScreenProps> = ({ 
@@ -26,7 +27,8 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
   summary,
   storyboardUrl,
   onDownloadLog, 
-  onRestart 
+  onRestart,
+  onRegenerateImage
 }) => {
   
   // Helper to render the HP Graph SVG
@@ -144,10 +146,21 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
 
        {/* Storyboard Section */}
        <div className="w-full max-w-5xl border-t border-zinc-800 pt-8 mb-12">
-            <h3 className="cinzel text-xl font-bold text-zinc-300 mb-6 flex items-center gap-2 justify-center">
-                <ImageIcon size={20} />
-                Visual Legend
-            </h3>
+            <div className="flex items-center justify-center gap-4 mb-6 relative">
+                <h3 className="cinzel text-xl font-bold text-zinc-300 flex items-center gap-2">
+                    <ImageIcon size={20} />
+                    Visual Legend
+                </h3>
+                {summary && (
+                    <button 
+                        onClick={onRegenerateImage}
+                        className="absolute right-0 md:static p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full text-zinc-400 hover:text-white transition-colors border border-zinc-700"
+                        title="Regenerate Image"
+                    >
+                        <RotateCcw size={16} />
+                    </button>
+                )}
+            </div>
             
             <div className="w-full aspect-video bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden flex items-center justify-center relative shadow-2xl">
                 {storyboardUrl ? (

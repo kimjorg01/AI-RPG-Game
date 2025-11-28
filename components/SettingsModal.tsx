@@ -1,7 +1,7 @@
 
 import React, { useRef } from 'react';
 import { AppSettings, ImageSize, StoryModel, UIScale } from '../types';
-import { X, Settings, Image as ImageIcon, Zap, Brain, Save, Upload, RotateCcw, AlertTriangle, Monitor, ZoomIn } from 'lucide-react';
+import { X, Settings, Image as ImageIcon, Zap, Brain, Save, Upload, RotateCcw, AlertTriangle, Monitor, ZoomIn, Activity, BrainCircuit } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -177,9 +177,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Zap size={20} />
-                <span className="font-bold">Fast & Cheap</span>
+                <span className="font-bold">Fast</span>
                 <span className="text-xs opacity-70">Gemini 2.5 Flash</span>
               </button>
+
+              <button
+                onClick={() => onUpdateSettings({ ...settings, storyModel: StoryModel.Pro25 })}
+                className={`p-3 rounded border flex flex-col items-center gap-2 transition-all ${
+                  settings.storyModel === StoryModel.Pro25 
+                    ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                }`}
+              >
+                <Activity size={20} />
+                <span className="font-bold">Balanced</span>
+                <span className="text-xs opacity-70">Gemini 2.5 Pro</span>
+              </button>
+
+              <button
+                onClick={() => onUpdateSettings({ ...settings, storyModel: StoryModel.SmartLowThinking })}
+                className={`p-3 rounded border flex flex-col items-center gap-2 transition-all ${
+                  settings.storyModel === StoryModel.SmartLowThinking 
+                    ? 'bg-amber-900/40 border-amber-500 text-amber-200' 
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                }`}
+              >
+                <BrainCircuit size={20} />
+                <span className="font-bold">Smart (Low Think)</span>
+                <span className="text-xs opacity-70">Gemini 3 Pro</span>
+              </button>
+
               <button
                 onClick={() => onUpdateSettings({ ...settings, storyModel: StoryModel.Smart })}
                 className={`p-3 rounded border flex flex-col items-center gap-2 transition-all ${
@@ -189,7 +216,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Brain size={20} />
-                <span className="font-bold">Smart (Default)</span>
+                <span className="font-bold">Smart (Full)</span>
                 <span className="text-xs opacity-70">Gemini 3 Pro</span>
               </button>
             </div>

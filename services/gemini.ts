@@ -16,12 +16,10 @@ Your goal is to weave a compelling narrative based on the user's choices, GENRE,
 
 Rules:
 1.  **Genre & Tone**: Adhere strictly to the selected genre (e.g., Fantasy, Sci-Fi, Horror).
-2.  **Stats**: STR (Power), DEX (Agility), CON (Health), INT (Magic/Mind), CHA (Presence).
+2.  **Stats**: STR (Power), DEX (Agility), CON (Health), INT (Magic/Mind), CHA (Presence), PER (Senses/Observation), LUK (Fate/Chance).
 3.  **Equipment & Inventory (STRICT)**:
     *   **Context Matches Gear**: If the user chooses "Shoot them", CHECK THEIR EQUIPPED GEAR. If they hold a Sword, they fail or throw it.
-    *   **Auto-Equip**: If the user's choice implies using an item they have in their **Backpack** (Inventory) but NOT equipped (e.g., "I pull out my Shotgun"), you MUST:
-        *   Narrate the action of drawing the weapon.
-        *   Populate 'equipment_update.equip' with the Item Name.
+    *   **Usage Rule**: If an item is NOT equipped, the user CANNOT use it effectively in combat/action sequences unless they spend a turn to equip it (which you should narrate as a setup action).
     *   **Lost Items**: If the narrative implies an item is broken, lost, or consumed (e.g., "The grenade explodes", "You drop the key"), CHECK if it exists in Inventory or Equipped. If yes, populate 'inventory_removed'. If no, simply mock the user for trying to use what they don't have.
 4.  **Heroic Actions (Anti-Cheat)**: 
     *   If a user Custom Action attempts to conjure items they do not possess, DENY IT. Mock them.
@@ -66,7 +64,8 @@ export const generateStoryStep = async (
   genre: string,
   rollResult: RollResult | null,
   customAction: { text: string, item: string, roll: number } | null,
-  modelName: StoryModel = StoryModel.Smart
+  modelName: StoryModel = StoryModel.Smart,
+  onLog?: (type: 'request' | 'response' | 'error', content: any) => void
 ): Promise<AIStoryResponse> => {
   const ai = getAIClient();
   
@@ -106,7 +105,7 @@ export const generateStoryStep = async (
   const prompt = `
     Context:
     - Genre: ${genre}
-    - Base Stats: STR:${stats.STR}, DEX:${stats.DEX}, CON:${stats.CON}, INT:${stats.INT}, CHA:${stats.CHA}
+    - Base Stats: STR:${stats.STR}, DEX:${stats.DEX}, CON:${stats.CON}, INT:${stats.INT}, CHA:${stats.CHA}, PER:${stats.PER}, LUK:${stats.LUK}
     
     Current Loadout (CRITICAL - RESPECT THIS):
     ${equippedString}
@@ -128,11 +127,22 @@ export const generateStoryStep = async (
     Generate the next segment.
   `;
 
+  if (onLog) onLog('request', prompt);
+
+  let actualModel = modelName as string;
+  let thinkingConfig: any = undefined;
+
+  if (modelName === StoryModel.SmartLowThinking) {
+      actualModel = StoryModel.Smart;
+      thinkingConfig = { thinkingLevel: "low" };
+  }
+
   try {
     const response = await ai.models.generateContent({
-      model: modelName,
+      model: actualModel,
       contents: prompt,
       config: {
+        thinkingConfig,
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
         responseSchema: {
@@ -146,7 +156,7 @@ export const generateStoryStep = async (
                 type: Type.OBJECT,
                 properties: {
                     text: { type: Type.STRING, description: "Description of the action. Wrap the key VERB/ACTION in asterisks * like *THIS*." },
-                    type: { type: Type.STRING, enum: ['STR', 'DEX', 'CON', 'INT', 'CHA'], nullable: true },
+                    type: { type: Type.STRING, enum: ['STR', 'DEX', 'CON', 'INT', 'CHA', 'PER', 'LUK'], nullable: true },
                     difficulty: { type: Type.INTEGER, nullable: true, description: "DC between 5 and 30" }
                 },
                 required: ["text"]
@@ -159,31 +169,12 @@ export const generateStoryStep = async (
                 properties: {
                   name: { type: Type.STRING },
                   type: { type: Type.STRING, enum: ['weapon', 'armor', 'accessory', 'misc'] },
-                  description: { type: Type.STRING },
-                  bonuses: {
-                    type: Type.OBJECT,
-                    properties: {
-                      STR: { type: Type.INTEGER },
-                      DEX: { type: Type.INTEGER },
-                      CON: { type: Type.INTEGER },
-                      INT: { type: Type.INTEGER },
-                      CHA: { type: Type.INTEGER },
-                    },
-                    nullable: true
-                  }
+                  description: { type: Type.STRING }
                 },
                 required: ["name", "type"]
               } 
             },
             inventory_removed: { type: Type.ARRAY, items: { type: Type.STRING } },
-            equipment_update: {
-                type: Type.OBJECT,
-                description: "Auto-equip items from inventory if the user's action implies drawing/using them.",
-                properties: {
-                    equip: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    unequip: { type: Type.ARRAY, items: { type: Type.STRING } }
-                }
-            },
             quest_update: { type: Type.STRING },
             hp_change: { type: Type.INTEGER },
             game_status: { type: Type.STRING, enum: ['ongoing', 'won', 'lost'] },
@@ -196,6 +187,8 @@ export const generateStoryStep = async (
                     CON: { type: Type.INTEGER },
                     INT: { type: Type.INTEGER },
                     CHA: { type: Type.INTEGER },
+                    PER: { type: Type.INTEGER },
+                    LUK: { type: Type.INTEGER },
                 }
             },
             new_effects: {
@@ -217,6 +210,8 @@ export const generateStoryStep = async (
                                 CON: { type: Type.INTEGER },
                                 INT: { type: Type.INTEGER },
                                 CHA: { type: Type.INTEGER },
+                                PER: { type: Type.INTEGER },
+                                LUK: { type: Type.INTEGER },
                             }
                         }
                     },
@@ -258,7 +253,7 @@ export const generateStoryStep = async (
                 type: Type.OBJECT,
                 description: "Required ONLY for Custom Actions: Return the calculated result of the action.",
                 properties: {
-                    stat: { type: Type.STRING, enum: ['STR', 'DEX', 'CON', 'INT', 'CHA'] },
+                    stat: { type: Type.STRING, enum: ['STR', 'DEX', 'CON', 'INT', 'CHA', 'PER', 'LUK'] },
                     difficulty: { type: Type.INTEGER },
                     base_roll: { type: Type.INTEGER },
                     total: { type: Type.INTEGER },
@@ -275,8 +270,23 @@ export const generateStoryStep = async (
     const text = response.text;
     if (!text) throw new Error("No response text from AI");
     
-    return JSON.parse(text) as AIStoryResponse;
+    if (onLog) onLog('response', text);
+
+    try {
+        return JSON.parse(text) as AIStoryResponse;
+    } catch (parseError) {
+        if (onLog) onLog('error', `JSON Parse Error: ${parseError}\nRaw Text: ${text}`);
+        console.error("JSON Parse Error", parseError);
+        // Fallback to prevent crash
+        return {
+            narrative: "The world shifts and blurs... (AI returned invalid data).",
+            choices: [{ text: "Try to focus" }],
+            game_status: 'ongoing'
+        };
+    }
+
   } catch (error) {
+    if (onLog) onLog('error', error);
     console.error("Story generation failed:", error);
     return {
       narrative: "The mists of time obscure the path forward... (AI Error, please try again)",
@@ -287,7 +297,10 @@ export const generateStoryStep = async (
   }
 };
 
-export const generateGameSummary = async (historyText: string): Promise<string> => {
+export const generateGameSummary = async (
+    historyText: string,
+    onLog?: (type: 'request' | 'response' | 'error', content: any) => void
+): Promise<string> => {
   const ai = getAIClient();
   const prompt = `
   Read the following adventure log and write a concise, engaging summary (3-5 sentences) of the entire journey. 
@@ -297,19 +310,27 @@ export const generateGameSummary = async (historyText: string): Promise<string> 
   ${historyText}
   `;
   
+  if (onLog) onLog('request', `[SUMMARY GENERATION]\n${prompt}`);
+
   try {
       const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: prompt
       });
-      return response.text || "The tale is lost to the void.";
+      const text = response.text || "The tale is lost to the void.";
+      if (onLog) onLog('response', `[SUMMARY RESULT]\n${text}`);
+      return text;
   } catch(e) {
+      if (onLog) onLog('error', `[SUMMARY ERROR]\n${e}`);
       console.error(e);
       return "Summary unavailable.";
   }
 };
 
-export const generateStoryboard = async (summary: string): Promise<string | null> => {
+export const generateStoryboard = async (
+    summary: string,
+    onLog?: (type: 'request' | 'response' | 'error', content: any) => void
+): Promise<string | null> => {
     const ai = getAIClient();
     // High quality image model for the final reward
     const prompt = `
@@ -322,6 +343,8 @@ export const generateStoryboard = async (summary: string): Promise<string | null
     
     Make it look epic and cohesive.
     `;
+
+    if (onLog) onLog('request', `[IMAGE GENERATION]\n${prompt}`);
 
     try {
         const response = await ai.models.generateContent({
@@ -337,11 +360,14 @@ export const generateStoryboard = async (summary: string): Promise<string | null
 
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
+                if (onLog) onLog('response', `[IMAGE GENERATED]\n(Base64 Image Data Received)`);
                 return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
             }
         }
+        if (onLog) onLog('error', `[IMAGE ERROR]\nNo inline data found in response.`);
         return null;
     } catch (e) {
+        if (onLog) onLog('error', `[IMAGE ERROR]\n${e}`);
         console.error("Storyboard generation failed", e);
         return null;
     }

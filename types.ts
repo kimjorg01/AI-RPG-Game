@@ -1,5 +1,5 @@
 
-export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA';
+export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA' | 'PER' | 'LUK';
 export type ItemType = 'weapon' | 'armor' | 'accessory' | 'misc';
 
 export interface CharacterStats {
@@ -8,6 +8,8 @@ export interface CharacterStats {
   CON: number;
   INT: number;
   CHA: number;
+  PER: number;
+  LUK: number;
 }
 
 export type StatExperience = Record<StatType, number>;
@@ -116,13 +118,8 @@ export interface AIStoryResponse {
     name: string; 
     type: ItemType; 
     description?: string; 
-    bonuses?: Partial<CharacterStats>; 
   }[];
   inventory_removed?: string[];
-  equipment_update?: {
-    equip?: string[];   // Names of items to equip from inventory
-    unequip?: string[]; // Names of items to unequip to inventory
-  };
   quest_update?: string;
   visual_prompt?: string;
   hp_change?: number;
@@ -151,6 +148,8 @@ export enum ImageSize {
 
 export enum StoryModel {
   Smart = "gemini-3-pro-preview",
+  SmartLowThinking = "gemini-3-pro-preview-low",
+  Pro25 = "gemini-2.5-pro",
   Fast = "gemini-2.5-flash",
 }
 

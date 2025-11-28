@@ -10,90 +10,151 @@ export const createItemFromString = (name: string): InventoryItem => {
 
   // --- 1. DETERMINE TYPE ---
 
-  // Weapons: Medieval, Modern, Improvised
-  if (lowerName.match(/sword|axe|dagger|blade|spear|mace|hammer|bow|staff|wand|pipe|bar|club|stick|rock|stone|brick|shiv|knife|glass|shard|wrench|crowbar|bat|pistol|rifle|gun|blaster|saber|claws/)) {
+  // Weapons: Melee, Ranged, Magic, Sci-Fi
+  if (lowerName.match(/sword|axe|dagger|blade|spear|mace|hammer|bow|staff|wand|rod|scepter|pipe|bar|club|stick|rock|stone|brick|shiv|knife|glass|shard|wrench|crowbar|bat|pistol|rifle|gun|blaster|saber|claws|fist|knuckles|gauntlet|scythe|whip|flail|morningstar|halberd|pike|lance|trident|rapier|katana|scimitar|claymore|zweihander|maul|sledge|crossbow|dart|shuriken|sling|revolver|sniper|shotgun|smg|cannon|raygun|phaser|taser|prod|cutter|chainsaw|drill/)) {
     type = 'weapon';
   } 
-  // Armor: Medieval, Modern, Clothing
-  else if (lowerName.match(/shield|armor|mail|plate|helmet|robe|cloak|vest|jacket|coat|shirt|tunic|boots|gloves|bracers|pants|greaves|suit|garb/)) {
+  // Armor: Body, Head, Shield, Feet, Hands
+  else if (lowerName.match(/shield|armor|mail|plate|helmet|helm|cap|hat|robe|cloak|vest|jacket|coat|shirt|tunic|boots|shoes|sandals|gloves|bracers|pants|greaves|suit|garb|cuirass|breastplate|brigandine|hide|leather|kevlar|flak|exoskeleton|mech|power|bodysuit|jumpsuit|cowl|hood|mask|visor|buckler|targe/)) {
     type = 'armor';
   } 
-  // Accessories: Jewelry, Tech, Magic
-  else if (lowerName.match(/ring|amulet|necklace|charm|gem|stone|talisman|watch|goggles|glasses|monocle|crown|tiara|belt|scarf|pendant|orb|device|gadget/)) {
+  // Accessories: Jewelry, Wearables, Gadgets, Magic Items
+  else if (lowerName.match(/ring|amulet|necklace|charm|gem|stone|talisman|watch|goggles|glasses|monocle|crown|tiara|circlet|belt|sash|girdle|scarf|pendant|orb|device|gadget|tool|kit|totem|idol|relic|artifact|symbol|badge|medal|token|card|die|dice|coin|lens|scope|tracker|scanner|implant|chip/)) {
     type = 'accessory';
   }
 
   // --- 2. ASSIGN STATS BASED ON KEYWORDS ---
   
   if (type === 'weapon') {
-    // Heavy / Blunt -> STR
-    if (lowerName.match(/heavy|great|hammer|axe|mace|club|pipe|bar|wrench|crowbar|bat|rock|brick/)) {
+    // STR: Heavy, Blunt, Two-Handed
+    if (lowerName.match(/heavy|great|hammer|axe|mace|club|pipe|bar|wrench|crowbar|bat|rock|brick|maul|sledge|flail|morningstar|claymore|zweihander|halberd|pike|lance|trident|chainsaw|drill|cannon/)) {
       bonuses.STR = (bonuses.STR || 0) + 2;
     } 
-    // Finesse / Ranged -> DEX
-    else if (lowerName.match(/dagger|bow|rapier|knife|shiv|spear|pistol|rifle|gun|blaster/)) {
+    // DEX: Finesse, Ranged, Light
+    else if (lowerName.match(/dagger|bow|rapier|knife|shiv|spear|pistol|rifle|gun|blaster|scimitar|katana|saber|whip|dart|shuriken|sling|revolver|sniper|shotgun|smg|raygun|phaser|needle|scalpel/)) {
       bonuses.DEX = (bonuses.DEX || 0) + 2;
     } 
-    // Magic -> INT
-    else if (lowerName.match(/staff|wand|tome|saber/)) {
+    // INT: Magic, Tech, Complex
+    else if (lowerName.match(/staff|wand|tome|rod|scepter|orb|crystal|rune|grimoire|scroll|taser|prod|cutter|laser|plasma|shock/)) {
       bonuses.INT = (bonuses.INT || 0) + 2;
-    } 
-    // Default Weapon (Sword, etc) -> STR
+    }
+    // PER: Precision weapons
+    else if (lowerName.match(/sniper|scope|sight|longbow|crossbow/)) {
+      bonuses.PER = (bonuses.PER || 0) + 2;
+      bonuses.DEX = (bonuses.DEX || 0) + 1;
+    }
+    // CHA: Flashy weapons
+    else if (lowerName.match(/golden|ornate|royal|king|queen|ceremonial|rapier/)) {
+      bonuses.CHA = (bonuses.CHA || 0) + 2;
+      bonuses.DEX = (bonuses.DEX || 0) + 1;
+    }
+    // Default Weapon (Sword, etc) -> STR/DEX mix
     else {
       bonuses.STR = (bonuses.STR || 0) + 1;
+      bonuses.DEX = (bonuses.DEX || 0) + 1;
     }
   } 
   
   else if (type === 'armor') {
-    // Heavy / Metal -> CON
-    if (lowerName.match(/plate|heavy|mail|metal|riot/)) {
-      bonuses.CON = (bonuses.CON || 0) + 2;
-      bonuses.DEX = (bonuses.DEX || 0) - 1; // Heavy armor penalty
+    // Heavy / Metal -> CON++ / DEX-
+    if (lowerName.match(/plate|heavy|mail|metal|riot|mech|power|exoskeleton|full|knight/)) {
+      bonuses.CON = (bonuses.CON || 0) + 3;
+      bonuses.DEX = (bonuses.DEX || 0) - 1; 
     } 
-    // Magic / Robes -> INT
-    else if (lowerName.match(/robe|cloak|wizard|mage/)) {
-      bonuses.INT = (bonuses.INT || 0) + 1;
+    // Medium / Tactical -> CON+ / DEX+
+    else if (lowerName.match(/kevlar|tactical|flak|vest|breastplate|cuirass|brigandine|chain|scale/)) {
+      bonuses.CON = (bonuses.CON || 0) + 2;
+    }
+    // Light / Stealth -> DEX++
+    else if (lowerName.match(/leather|studded|padded|gambeson|tunic|bodysuit|jumpsuit|stealth|camo|ninja|thief/)) {
+      bonuses.DEX = (bonuses.DEX || 0) + 2;
+      bonuses.CON = (bonuses.CON || 0) + 1;
+    }
+    // Magic / Robes -> INT++ / CON+
+    else if (lowerName.match(/robe|cloak|wizard|mage|sorcerer|cowl|hood|vestment|mantle/)) {
+      bonuses.INT = (bonuses.INT || 0) + 2;
       bonuses.CON = (bonuses.CON || 0) + 1;
     } 
-    // Light / Clothing -> DEX/CON
+    // Shields -> CON++ / STR+
+    else if (lowerName.match(/shield|buckler|targe|bulwark/)) {
+      bonuses.CON = (bonuses.CON || 0) + 2;
+      bonuses.STR = (bonuses.STR || 0) + 1;
+    }
+    // Default Armor -> CON+
     else {
       bonuses.CON = (bonuses.CON || 0) + 1;
     }
   } 
   
   else if (type === 'accessory') {
-    if (lowerName.match(/strength|power|muscle|bear/)) bonuses.STR = 1;
-    else if (lowerName.match(/dexterity|swift|cat|thief|speed/)) bonuses.DEX = 1;
-    else if (lowerName.match(/health|vitality|life|heart/)) bonuses.CON = 1;
-    else if (lowerName.match(/intelligence|mind|wisdom|owl|fox|smart/)) bonuses.INT = 1;
-    else if (lowerName.match(/charisma|charm|king|leader|eagle|gold/)) bonuses.CHA = 1;
-    else if (lowerName.match(/watch|gadget|device/)) bonuses.INT = 1; // Tech is usually INT
+    // Specific Stat Keywords
+    if (lowerName.match(/strength|power|muscle|bear|bull|giant|titan|force|impact/)) bonuses.STR = 1;
+    else if (lowerName.match(/dexterity|swift|cat|thief|speed|reflex|agility|cobra|viper|wind/)) bonuses.DEX = 1;
+    else if (lowerName.match(/health|vitality|life|heart|troll|regeneration|stamina|endurance/)) bonuses.CON = 1;
+    else if (lowerName.match(/intelligence|mind|wisdom|owl|fox|smart|sage|arcane|knowledge|logic|memory/)) bonuses.INT = 1;
+    else if (lowerName.match(/charisma|charm|king|leader|eagle|gold|presence|persuasion|diplomat|noble/)) bonuses.CHA = 1;
+    else if (lowerName.match(/perception|sight|eye|vision|scope|lens|glasses|goggles|tracker|scanner|hawk|eagle|scout/)) bonuses.PER = 1;
+    else if (lowerName.match(/luck|fate|fortune|clover|coin|rabbit|dice|chance|gambler|chaos|wild/)) bonuses.LUK = 1;
+    
+    // Tech -> INT/PER
+    else if (lowerName.match(/watch|gadget|device|implant|chip|sensor|computer|datapad/)) {
+        bonuses.INT = 1;
+        bonuses.PER = 1;
+    }
+    // Magic -> INT/CHA
+    else if (lowerName.match(/ring|amulet|talisman|orb|gem|crystal/)) {
+        // If no specific stat matched above, give a random mental stat
+        const mentalStats: (keyof CharacterStats)[] = ['INT', 'CHA', 'PER', 'LUK'];
+        const randomStat = mentalStats[Math.floor(Math.random() * mentalStats.length)];
+        bonuses[randomStat] = 1;
+    }
     else {
         // Random stat for generic accessories if no keyword matches
-        const stats: (keyof CharacterStats)[] = ['STR', 'DEX', 'CON', 'INT', 'CHA'];
+        const stats: (keyof CharacterStats)[] = ['STR', 'DEX', 'CON', 'INT', 'CHA', 'PER', 'LUK'];
         const randomStat = stats[Math.floor(Math.random() * stats.length)];
         bonuses[randomStat] = 1;
     }
   }
 
   // --- 3. QUALITY MODIFIERS ---
-  // Modifiers apply to the primary stat found above, or add a new one
-  if (lowerName.match(/rusty|broken|cracked|shoddy|old/)) {
-    // Penalty or reduce bonus. 
-    // We simply won't add extra bonuses, or we reduce the primary one slightly (min 0)
+  
+  // Negative Modifiers
+  if (lowerName.match(/rusty|broken|cracked|shoddy|old|weak|dull|dirty|poor|cursed|damaged/)) {
     const keys = Object.keys(bonuses) as (keyof CharacterStats)[];
     if (keys.length > 0) {
-        bonuses[keys[0]] = Math.max(1, (bonuses[keys[0]] || 1) - 1);
+        // Reduce the highest bonus
+        const primary = keys[0];
+        bonuses[primary] = Math.max(0, (bonuses[primary] || 1) - 1);
+    }
+    // Cursed items might give bad luck
+    if (lowerName.match(/cursed/)) {
+        bonuses.LUK = (bonuses.LUK || 0) - 2;
     }
   }
   
-  if (lowerName.match(/magic|enchanted|legendary|flaming|divine|masterwork|high-tech|plasma|laser/)) {
+  // Positive Modifiers
+  if (lowerName.match(/fine|sharp|balanced|reinforced|hardened|polished|new|quality|improved/)) {
+     const keys = Object.keys(bonuses) as (keyof CharacterStats)[];
+     if (keys.length > 0) {
+        bonuses[keys[0]] = (bonuses[keys[0]] || 0) + 1;
+     }
+  }
+
+  // Legendary / Magic Modifiers
+  if (lowerName.match(/magic|enchanted|legendary|epic|mythic|ancient|divine|holy|demonic|masterwork|high-tech|plasma|laser|quantum|cybernetic|glowing|flaming|frozen|shocking|vampiric/)) {
     const keys = Object.keys(bonuses) as (keyof CharacterStats)[];
     if (keys.length > 0) {
-       bonuses[keys[0]] = (bonuses[keys[0]] || 0) + 1;
+       // Boost primary stat significantly
+       bonuses[keys[0]] = (bonuses[keys[0]] || 0) + 2;
+       // Add a secondary stat based on flavor
+       if (lowerName.match(/flaming|shocking|plasma|laser/)) bonuses.STR = (bonuses.STR || 0) + 1; // Damage
+       if (lowerName.match(/frozen|holy|divine/)) bonuses.CON = (bonuses.CON || 0) + 1; // Defense/Health
+       if (lowerName.match(/demonic|vampiric/)) bonuses.LUK = (bonuses.LUK || 0) - 1; // Cost
+       if (lowerName.match(/ancient|mythic/)) bonuses.INT = (bonuses.INT || 0) + 1; // Knowledge
     } else {
-       // If it was misc but legendary, give it CHA
-       bonuses.CHA = 1;
+       // If it was misc but legendary, give it CHA/LUK
+       bonuses.CHA = 2;
+       bonuses.LUK = 1;
     }
   }
 

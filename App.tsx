@@ -12,10 +12,13 @@ import { GameOverScreen } from './components/GameOverScreen';
 import { CustomChoiceModal } from './components/CustomChoiceModal';
 import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale } from './types';
 import { generateStoryStep, generateGameSummary, generateStoryboard } from './services/gemini';
-import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle } from 'lucide-react';
+import { createItemFromString } from './services/itemFactory';
+import { inferStatFromText } from './services/statInference';
+import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal } from 'lucide-react';
+import { DebugConsole, LogEntry } from './components/DebugConsole';
 
 const BASE_HP = 100;
-const DEFAULT_STATS = { STR: 10, DEX: 10, CON: 10, INT: 10, CHA: 10 };
+const DEFAULT_STATS = { STR: 10, DEX: 10, CON: 10, INT: 10, CHA: 10, PER: 10, LUK: 10 };
 const EXP_THRESHOLD = 3;
 
 // Helper to determine risk visual properties
@@ -56,6 +59,8 @@ const getStatConfig = (stat: string) => {
     case 'CON': return { icon: Shield, color: 'text-orange-500', label: 'Constitution', borderHover: 'hover:border-orange-500', bgHover: 'hover:bg-orange-950/20' };
     case 'INT': return { icon: Brain, color: 'text-blue-500', label: 'Intelligence', borderHover: 'hover:border-blue-500', bgHover: 'hover:bg-blue-950/20' };
     case 'CHA': return { icon: Crown, color: 'text-purple-500', label: 'Charisma', borderHover: 'hover:border-purple-500', bgHover: 'hover:bg-purple-950/20' };
+    case 'PER': return { icon: Eye, color: 'text-teal-500', label: 'Perception', borderHover: 'hover:border-teal-500', bgHover: 'hover:bg-teal-950/20' };
+    case 'LUK': return { icon: Clover, color: 'text-yellow-500', label: 'Luck', borderHover: 'hover:border-yellow-500', bgHover: 'hover:bg-yellow-950/20' };
     default: return { icon: Circle, color: 'text-zinc-400', label: 'Action', borderHover: 'hover:border-zinc-500', bgHover: 'hover:bg-zinc-900/50' };
   }
 };
@@ -77,7 +82,7 @@ const App: React.FC = () => {
     phase: 'menu',
     genre: 'Fantasy',
     stats: DEFAULT_STATS,
-    statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0 },
+    statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0, LUK: 0 },
     activeEffects: [],
     startingStats: DEFAULT_STATS,
     customChoicesRemaining: 3
@@ -95,6 +100,19 @@ const App: React.FC = () => {
   const [showCustomChoice, setShowCustomChoice] = useState(false);
   const [currentChoices, setCurrentChoices] = useState<ChoiceData[]>([]);
   const [hasApiKey, setHasApiKey] = useState(false);
+  
+  // Debug Console State
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<LogEntry[]>([]);
+
+  const addLog = (type: 'request' | 'response' | 'error', content: any) => {
+    setDebugLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(7),
+      timestamp: Date.now(),
+      type,
+      content
+    }]);
+  };
   
   const [pendingChoice, setPendingChoice] = useState<ChoiceData | null>(null);
   
@@ -114,13 +132,13 @@ const App: React.FC = () => {
   useEffect(() => {
       if (gameState.phase === 'game_over' && !gameState.finalSummary) {
           const fullLog = gameState.history.map(t => `${t.isUserTurn ? 'USER' : 'DM'}: ${t.text}`).join('\n');
-          generateGameSummary(fullLog).then(summary => {
+          generateGameSummary(fullLog, addLog).then(summary => {
               setGameState(prev => ({ ...prev, finalSummary: summary }));
               
               // Only generate storyboard if user has API key (uses paid model generally)
               // or allow it and let it fail/prompt.
               if (hasApiKey) {
-                  generateStoryboard(summary).then(imageUrl => {
+                  generateStoryboard(summary, addLog).then(imageUrl => {
                       if (imageUrl) {
                           setGameState(prev => ({ ...prev, finalStoryboard: imageUrl }));
                       }
@@ -142,6 +160,8 @@ const App: React.FC = () => {
           if (bonuses.CON) calculated.CON += bonuses.CON;
           if (bonuses.INT) calculated.INT += bonuses.INT;
           if (bonuses.CHA) calculated.CHA += bonuses.CHA;
+          if (bonuses.PER) calculated.PER += bonuses.PER;
+          if (bonuses.LUK) calculated.LUK += bonuses.LUK;
       };
 
       applyBonus(equipped.weapon?.bonuses);
@@ -207,6 +227,11 @@ const App: React.FC = () => {
 
   const handleUnequip = (item: InventoryItem) => {
       setGameState(prev => {
+          if (prev.inventory.length >= 8) {
+              addLog('error', 'Inventory is full! Cannot unequip item.');
+              return prev;
+          }
+
           const slot = item.type === 'weapon' ? 'weapon' : item.type === 'armor' ? 'armor' : item.type === 'accessory' ? 'accessory' : null;
           if (!slot) return prev;
 
@@ -223,6 +248,13 @@ const App: React.FC = () => {
       });
   };
 
+  const handleDiscard = (item: InventoryItem) => {
+      setGameState(prev => ({
+          ...prev,
+          inventory: prev.inventory.filter(i => i.id !== item.id)
+      }));
+  };
+
   // --- Core Game Logic ---
   const handleNewGame = () => {
     setGameState(prev => ({ 
@@ -233,7 +265,7 @@ const App: React.FC = () => {
         npcs: [],
         equipped: { weapon: null, armor: null, accessory: null },
         hpHistory: [BASE_HP],
-        statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0 },
+        statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0, LUK: 0 },
         activeEffects: [],
         customChoicesRemaining: 3,
         finalSummary: undefined,
@@ -374,7 +406,7 @@ const App: React.FC = () => {
         .filter(e => e.duration > 0);
 
     const recentHistory = gameState.history
-      .slice(-8)
+      .slice(-5)
       .map(t => {
         let entry = `${t.isUserTurn ? 'User' : 'DM'}: ${t.text}`;
         if (t.rollResult) {
@@ -397,50 +429,60 @@ const App: React.FC = () => {
       gameState.genre,
       rollResult,
       customAction,
-      settings.storyModel
+      settings.storyModel,
+      addLog // Pass logger
     );
 
+    // Sanitize choices: 
+    // 1. If type exists but difficulty is missing, add random DC
+    // 2. If type is missing, try to infer it from text keywords
+    if (aiResponse.choices) {
+        aiResponse.choices = aiResponse.choices.map(c => {
+            let type = c.type;
+            let difficulty = c.difficulty;
+
+            // Try to infer type if missing
+            if (!type) {
+                const inferred = inferStatFromText(c.text);
+                if (inferred) {
+                    type = inferred;
+                }
+            }
+
+            // If we have a type (either from AI or inferred) but no difficulty, assign one
+            if (type && (difficulty === undefined || difficulty === null)) {
+                 // Random DC between 8 (Very Easy) and 12 (Moderate)
+                 difficulty = 8 + Math.floor(Math.random() * 5);
+            }
+
+            return { ...c, type, difficulty };
+        });
+    }
+
     setGameState(prev => {
-        const newItems: InventoryItem[] = (aiResponse.inventory_added || []).map(aiItem => ({
-            id: Math.random().toString(36).substring(7),
-            name: aiItem.name,
-            type: aiItem.type,
-            description: aiItem.description,
-            bonuses: aiItem.bonuses
-        }));
+        const newItems: InventoryItem[] = (aiResponse.inventory_added || []).map(aiItem => {
+            const factoryItem = createItemFromString(aiItem.name);
+            return {
+                ...factoryItem,
+                description: aiItem.description || factoryItem.description
+            };
+        });
 
         let removedNames = (aiResponse.inventory_removed || []).map(n => n.toLowerCase());
         
         let newEquipped = { ...prev.equipped };
         let equippedUpdated = false;
-
-        // --- Handle Auto-Equip / Unequip Logic ---
-        if (aiResponse.equipment_update) {
-            // Equip List
-            aiResponse.equipment_update.equip?.forEach(equipName => {
-                const itemToEquip = prev.inventory.find(i => i.name.toLowerCase() === equipName.toLowerCase());
-                if (itemToEquip) {
-                    const slot = itemToEquip.type === 'weapon' ? 'weapon' : itemToEquip.type === 'armor' ? 'armor' : itemToEquip.type === 'accessory' ? 'accessory' : null;
-                    if (slot) {
-                        newEquipped[slot] = itemToEquip;
-                        equippedUpdated = true;
-                    }
-                }
-            });
-
-            // Unequip List
-            aiResponse.equipment_update.unequip?.forEach(unequipName => {
-                const name = unequipName.toLowerCase();
-                if (newEquipped.weapon?.name.toLowerCase() === name) { newEquipped.weapon = null; equippedUpdated = true; }
-                if (newEquipped.armor?.name.toLowerCase() === name) { newEquipped.armor = null; equippedUpdated = true; }
-                if (newEquipped.accessory?.name.toLowerCase() === name) { newEquipped.accessory = null; equippedUpdated = true; }
-            });
-        }
         
         // --- Calculate final inventory ---
         let finalInventory = [...prev.inventory];
         finalInventory = [...finalInventory, ...newItems];
         finalInventory = finalInventory.filter(item => !removedNames.includes(item.name.toLowerCase()));
+
+        // Enforce 8 item limit
+        if (finalInventory.length > 8) {
+             addLog('error', 'Inventory overflow! Some items were discarded.');
+             finalInventory = finalInventory.slice(0, 8);
+        }
 
         if (equippedUpdated) {
             const equippedIds = [
@@ -596,6 +638,19 @@ const App: React.FC = () => {
     });
 
     setCurrentChoices(aiResponse.choices || []);
+  };
+
+  const handleRegenerateImage = () => {
+      if (!gameState.finalSummary) return;
+      
+      addLog('request', 'User requested image regeneration. Trying to create image...');
+      setGameState(prev => ({ ...prev, finalStoryboard: undefined }));
+      
+      generateStoryboard(gameState.finalSummary, addLog).then(imageUrl => {
+          if (imageUrl) {
+              setGameState(prev => ({ ...prev, finalStoryboard: imageUrl }));
+          }
+      });
   };
 
   const handleRestart = () => {
@@ -914,6 +969,7 @@ const App: React.FC = () => {
                       storyboardUrl={gameState.finalStoryboard}
                       onDownloadLog={handleDownloadLog}
                       onRestart={handleRestart}
+                      onRegenerateImage={handleRegenerateImage}
                    />
                  )}
               </div>
@@ -928,9 +984,26 @@ const App: React.FC = () => {
             isOpen={showRightSidebar}
             onEquip={handleEquip}
             onUnequip={handleUnequip}
+            onDiscard={handleDiscard}
           />
         </>
       )}
+
+      {/* Debug Toggle */}
+      <button 
+        onClick={() => setShowDebug(!showDebug)}
+        className="fixed bottom-4 right-4 z-50 p-2 bg-zinc-900/80 text-zinc-500 hover:text-zinc-200 rounded-full border border-zinc-800 hover:border-zinc-600 transition-all"
+        title="Toggle Debug Console"
+      >
+        <Terminal size={20} />
+      </button>
+
+      <DebugConsole 
+        isOpen={showDebug} 
+        logs={debugLogs} 
+        onClose={() => setShowDebug(false)} 
+        onClear={() => setDebugLogs([])}
+      />
 
       <SettingsModal 
         isOpen={showSettings} 
