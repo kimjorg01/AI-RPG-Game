@@ -123,7 +123,13 @@ const App: React.FC = () => {
   };
   
   const [pendingChoice, setPendingChoice] = useState<ChoiceData | null>(null);
+  const [pendingRoll, setPendingRoll] = useState<number | null>(null);
   
+  // Retry / Stop Logic
+  const [lastTurnParams, setLastTurnParams] = useState<any | null>(null);
+  const [showRetry, setShowRetry] = useState(false);
+  const requestIdRef = useRef(0);
+
   // Highlighting State for Interactions
   const [hoveredStat, setHoveredStat] = useState<StatType | null>(null);
   const [hoveredInventoryItem, setHoveredInventoryItem] = useState<InventoryItem | null>(null);
@@ -329,8 +335,58 @@ const App: React.FC = () => {
     if (gameState.isLoading || gameState.isRolling) return;
 
     if (settings.enableDiceRolls && choice.difficulty && choice.type) {
+      // Pre-calculate roll
+      const rollBase = Math.floor(Math.random() * 20) + 1;
+      const mod = getMod(currentStats[choice.type]);
+      const total = rollBase + mod;
+      const isSuccess = total >= choice.difficulty;
+      const statType = choice.type;
+
+      const result: RollResult = {
+          base: rollBase,
+          modifier: mod,
+          total: total,
+          isSuccess,
+          statType: statType,
+          difficulty: choice.difficulty
+      };
+
+      let levelUpEvent: LevelUpEvent | undefined = undefined;
+
+      // Update State for Roll & XP
+      setGameState(prev => {
+          let newState = { ...prev, isRolling: true };
+
+          if (isSuccess) {
+              const currentExp = prev.statExperience[statType];
+              const nextExp = currentExp + 1;
+              
+              if (nextExp >= EXP_THRESHOLD) {
+                  const oldValue = prev.stats[statType];
+                  const newValue = oldValue + 1;
+                  levelUpEvent = { stat: statType, oldValue, newValue };
+
+                  newState = {
+                      ...newState,
+                      statExperience: { ...prev.statExperience, [statType]: 0 },
+                      stats: { ...prev.stats, [statType]: newValue }
+                  };
+              } else {
+                  newState = {
+                      ...newState,
+                      statExperience: { ...prev.statExperience, [statType]: nextExp }
+                  };
+              }
+          }
+          return newState;
+      });
+
       setPendingChoice(choice);
-      setGameState(prev => ({ ...prev, isRolling: true }));
+      setPendingRoll(rollBase);
+      
+      // Start AI Request Immediately
+      processTurn(choice.text, result, null, levelUpEvent);
+
     } else {
       processTurn(choice.text, null, null);
     }
@@ -360,54 +416,274 @@ const App: React.FC = () => {
   };
 
   const handleRollComplete = (rollBase: number) => {
-    if (!pendingChoice || !pendingChoice.type || !pendingChoice.difficulty) return;
-
-    const mod = getMod(currentStats[pendingChoice.type]);
-    const total = rollBase + mod;
-    const isSuccess = total >= pendingChoice.difficulty;
-    const statType = pendingChoice.type;
-
-    const result: RollResult = {
-        base: rollBase,
-        modifier: mod,
-        total: total,
-        isSuccess,
-        statType: statType,
-        difficulty: pendingChoice.difficulty
-    };
-
     setGameState(prev => ({ ...prev, isRolling: false }));
     setPendingChoice(null);
-    
-    let levelUpEvent: LevelUpEvent | undefined = undefined;
-    
-    if (isSuccess) {
-        setGameState(prev => {
-            const currentExp = prev.statExperience[statType];
-            const nextExp = currentExp + 1;
-            
-            if (nextExp >= EXP_THRESHOLD) {
-                const oldValue = prev.stats[statType];
-                const newValue = oldValue + 1;
-                levelUpEvent = { stat: statType, oldValue, newValue };
+    setPendingRoll(null);
+  };
 
-                return {
-                    ...prev,
-                    statExperience: { ...prev.statExperience, [statType]: 0 },
-                    stats: { ...prev.stats, [statType]: newValue }
-                };
-            } else {
-                return {
-                    ...prev,
-                    statExperience: { ...prev.statExperience, [statType]: nextExp }
-                };
+  const handleStopRequest = () => {
+      requestIdRef.current += 1; // Invalidate current request
+      setGameState(prev => ({ ...prev, isLoading: false }));
+      setShowRetry(true);
+  };
+
+  const handleRetryRequest = () => {
+      if (!lastTurnParams) return;
+      setShowRetry(false);
+      setGameState(prev => ({ ...prev, isLoading: true }));
+      
+      const { userText, rollResult, customAction, overrideArc, decrementedEffects } = lastTurnParams;
+      generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc, decrementedEffects);
+  };
+
+  const generateAndProcessAIResponse = async (
+      userText: string,
+      rollResult: RollResult | null,
+      customAction: { text: string, item: string, roll: number } | null,
+      overrideArc: MainStoryArc | undefined,
+      decrementedEffects: StatusEffect[]
+  ) => {
+      const currentRequestId = ++requestIdRef.current;
+
+      const recentHistory = gameState.history
+        .slice(-5)
+        .map(t => {
+            let entry = `${t.isUserTurn ? 'User' : 'DM'}: ${t.text}`;
+            if (t.rollResult) {
+                entry += ` [Rolled ${t.rollResult.total} on ${t.rollResult.statType} vs DC ${t.rollResult.difficulty}: ${t.rollResult.isSuccess ? 'Success' : 'Fail'}]`;
             }
-        });
-    }
+            return entry;
+        })
+        .join('\n');
 
-    setTimeout(() => {
-        processTurn(pendingChoice.text, result, null, levelUpEvent);
-    }, 0);
+      try {
+          const aiResponse = await generateStoryStep(
+            recentHistory,
+            userText,
+            gameState.inventory,
+            gameState.equipped,
+            gameState.currentQuest,
+            gameState.hp,
+            currentStats,
+            decrementedEffects,
+            gameState.npcs,
+            gameState.genre,
+            rollResult,
+            customAction,
+            settings.storyModel,
+            addLog,
+            overrideArc || gameState.mainStoryArc
+          );
+
+          if (currentRequestId !== requestIdRef.current) {
+              console.log("Request cancelled or superseded");
+              return;
+          }
+
+          // Sanitize choices: 
+          if (aiResponse.choices) {
+              aiResponse.choices = aiResponse.choices.map(c => {
+                  let type = c.type;
+                  let difficulty = c.difficulty;
+
+                  if (!type) {
+                      const inferred = inferStatFromText(c.text);
+                      if (inferred) type = inferred;
+                  }
+
+                  if (type && (difficulty === undefined || difficulty === null)) {
+                      difficulty = 8 + Math.floor(Math.random() * 5);
+                  }
+
+                  return { ...c, type, difficulty };
+              });
+          }
+
+          setGameState(prev => {
+              const newItems: InventoryItem[] = (aiResponse.inventory_added || []).map(aiItem => {
+                  const factoryItem = createItemFromString(aiItem.name);
+                  return {
+                      ...factoryItem,
+                      description: aiItem.description || factoryItem.description
+                  };
+              });
+
+              let removedNames = (aiResponse.inventory_removed || []).map(n => n.toLowerCase());
+              
+              let newEquipped = { ...prev.equipped };
+              let equippedUpdated = false;
+              
+              let finalInventory = [...prev.inventory];
+              finalInventory = [...finalInventory, ...newItems];
+              finalInventory = finalInventory.filter(item => !removedNames.includes(item.name.toLowerCase()));
+
+              if (finalInventory.length > 8) {
+                  addLog('error', 'Inventory overflow! Some items were discarded.');
+                  finalInventory = finalInventory.slice(0, 8);
+              }
+
+              if (equippedUpdated) {
+                  // ... (Logic handled below implicitly by filtering equippedIds if needed, but let's keep original logic structure)
+              }
+              // Re-implementing the equipped logic from original processTurn to ensure consistency
+              const equippedIds = [
+                  newEquipped.weapon?.id, 
+                  newEquipped.armor?.id, 
+                  newEquipped.accessory?.id
+              ].filter(Boolean);
+              
+              finalInventory = finalInventory.filter(i => !equippedIds.includes(i.id));
+
+              const oldEquippedList = [prev.equipped.weapon, prev.equipped.armor, prev.equipped.accessory].filter(Boolean) as InventoryItem[];
+              
+              oldEquippedList.forEach(oldItem => {
+                  const stillEquipped = equippedIds.includes(oldItem.id);
+                  const destroyed = removedNames.includes(oldItem.name.toLowerCase());
+                  
+                  if (!stillEquipped && !destroyed) {
+                      if (!finalInventory.find(i => i.id === oldItem.id)) {
+                          finalInventory.push(oldItem);
+                      }
+                  }
+              });
+              
+              if (newEquipped.weapon && removedNames.includes(newEquipped.weapon.name.toLowerCase())) { newEquipped.weapon = null; equippedUpdated = true; }
+              if (newEquipped.armor && removedNames.includes(newEquipped.armor.name.toLowerCase())) { newEquipped.armor = null; equippedUpdated = true; }
+              if (newEquipped.accessory && removedNames.includes(newEquipped.accessory.name.toLowerCase())) { newEquipped.accessory = null; equippedUpdated = true; }
+
+              const hpChange = aiResponse.hp_change || 0;
+              let newHp = Math.min(prev.maxHp, Math.max(0, prev.hp + hpChange));
+              
+              let status = aiResponse.game_status || 'ongoing';
+              if (newHp <= 0) {
+                  status = 'lost';
+                  newHp = 0;
+              }
+              if (status !== 'ongoing') {
+                  setTimeout(() => setGameState(p => ({...p, phase: 'game_over'})), 1000);
+              }
+
+              let newStats = { ...prev.stats };
+              let finalStatsUpdate: Partial<CharacterStats> | undefined = undefined;
+              let finalStatExp = { ...prev.statExperience };
+              
+              if (aiResponse.stats_update) {
+                  finalStatsUpdate = {};
+                  const keys = Object.keys(aiResponse.stats_update) as Array<keyof CharacterStats>;
+                  keys.forEach(key => {
+                      let val = aiResponse.stats_update![key] || 0;
+                      if (val > 5) val = 5; 
+                      if (val < -2) val = -2;
+                      if (val !== 0) {
+                          finalStatsUpdate![key] = val;
+                          newStats[key] += val;
+                      }
+                  });
+                  if (Object.keys(finalStatsUpdate).length === 0) finalStatsUpdate = undefined;
+              }
+
+              const brandNewEffects: StatusEffect[] = (aiResponse.new_effects || []).map(e => ({
+                  ...e,
+                  id: Math.random().toString(36).substring(7)
+              }));
+              
+              const finalActiveEffects = [...prev.activeEffects, ...brandNewEffects];
+
+              // Process NPCs
+              let currentNPCs = [...prev.npcs];
+              const npcAdd = aiResponse.npcs_update?.add || [];
+              const npcUpdate = aiResponse.npcs_update?.update || [];
+              const npcRemove = aiResponse.npcs_update?.remove || [];
+
+              npcAdd.forEach(n => {
+                  currentNPCs.push({ ...n, id: Math.random().toString(36).substr(2, 9) } as NPC);
+              });
+
+              npcUpdate.forEach(u => {
+                  const index = currentNPCs.findIndex(n => n.name.toLowerCase() === u.name.toLowerCase());
+                  if (index !== -1) {
+                      currentNPCs[index] = { 
+                          ...currentNPCs[index], 
+                          condition: u.condition as any,
+                          type: u.status ? u.status as any : currentNPCs[index].type
+                      };
+                  }
+              });
+
+              currentNPCs = currentNPCs.filter(n => !npcRemove.includes(n.name));
+
+              let customActionLevelUp: LevelUpEvent | undefined = undefined;
+              let customActionRollResult: RollResult | undefined = undefined;
+
+              if (aiResponse.action_result) {
+                  const { stat, is_success, total, difficulty, base_roll } = aiResponse.action_result;
+                  
+                  const mod = total - base_roll;
+                  customActionRollResult = {
+                      statType: stat,
+                      total,
+                      difficulty,
+                      base: base_roll,
+                      modifier: mod,
+                      isSuccess: is_success
+                  };
+
+                  if (is_success) {
+                      const currentExp = finalStatExp[stat];
+                      const nextExp = currentExp + 1;
+                      
+                      if (nextExp >= EXP_THRESHOLD) {
+                          const oldValue = newStats[stat];
+                          newStats[stat] = oldValue + 1; 
+                          finalStatExp[stat] = 0;
+                          customActionLevelUp = { stat, oldValue, newValue: oldValue + 1 };
+                      } else {
+                          finalStatExp[stat] = nextExp;
+                      }
+                  }
+              }
+
+              const aiTurn: StoryTurn = {
+                  id: Date.now().toString() + '-ai',
+                  text: aiResponse.narrative,
+                  choices: aiResponse.choices,
+                  isUserTurn: false,
+                  statsUpdated: finalStatsUpdate, 
+                  inventoryAdded: newItems,
+                  inventoryRemoved: aiResponse.inventory_removed,
+                  newEffects: brandNewEffects.length > 0 ? brandNewEffects : undefined,
+                  rollResult: customActionRollResult,
+                  levelUpEvent: customActionLevelUp,
+                  npcUpdates: npcAdd 
+              };
+
+              return {
+                  ...prev,
+                  history: [...prev.history, aiTurn],
+                  inventory: finalInventory,
+                  equipped: equippedUpdated ? newEquipped : prev.equipped,
+                  activeEffects: finalActiveEffects,
+                  currentQuest: aiResponse.quest_update || prev.currentQuest,
+                  npcs: currentNPCs,
+                  isLoading: false,
+                  hp: newHp,
+                  hpHistory: [...prev.hpHistory, newHp],
+                  stats: newStats,
+                  statExperience: finalStatExp,
+                  gameStatus: status as any,
+                  phase: status === 'ongoing' ? 'playing' : 'game_over'
+              };
+          });
+
+          setCurrentChoices(aiResponse.choices || []);
+
+      } catch (error) {
+          console.error("AI Generation Error", error);
+          if (currentRequestId === requestIdRef.current) {
+             setGameState(prev => ({ ...prev, isLoading: false }));
+             setShowRetry(true);
+          }
+      }
   };
 
   const processTurn = async (
@@ -427,257 +703,30 @@ const App: React.FC = () => {
       levelUpEvent: levelUpEvent
     };
 
-    setGameState(prev => {
-        const updatedEffects = (prev.activeEffects || [])
-            .map(e => ({ ...e, duration: e.duration - 1 }))
-            .filter(e => e.duration > 0);
-
-        return {
-          ...prev,
-          history: [...prev.history, userTurn],
-          isLoading: true,
-          activeEffects: updatedEffects
-        };
-    });
-
+    // Calculate decremented effects ONCE here
     const decrementedEffects = (gameState.activeEffects || [])
         .map(e => ({ ...e, duration: e.duration - 1 }))
         .filter(e => e.duration > 0);
 
-    const recentHistory = gameState.history
-      .slice(-5)
-      .map(t => {
-        let entry = `${t.isUserTurn ? 'User' : 'DM'}: ${t.text}`;
-        if (t.rollResult) {
-            entry += ` [Rolled ${t.rollResult.total} on ${t.rollResult.statType} vs DC ${t.rollResult.difficulty}: ${t.rollResult.isSuccess ? 'Success' : 'Fail'}]`;
-        }
-        return entry;
-      })
-      .join('\n');
-
-    const aiResponse = await generateStoryStep(
-      recentHistory,
-      userText,
-      gameState.inventory,
-      gameState.equipped,
-      gameState.currentQuest,
-      gameState.hp,
-      currentStats,
-      decrementedEffects,
-      gameState.npcs,
-      gameState.genre,
-      rollResult,
-      customAction,
-      settings.storyModel,
-      addLog, // Pass logger
-      overrideArc || gameState.mainStoryArc
-    );
-
-    // Sanitize choices: 
-    // 1. If type exists but difficulty is missing, add random DC
-    // 2. If type is missing, try to infer it from text keywords
-    if (aiResponse.choices) {
-        aiResponse.choices = aiResponse.choices.map(c => {
-            let type = c.type;
-            let difficulty = c.difficulty;
-
-            // Try to infer type if missing
-            if (!type) {
-                const inferred = inferStatFromText(c.text);
-                if (inferred) {
-                    type = inferred;
-                }
-            }
-
-            // If we have a type (either from AI or inferred) but no difficulty, assign one
-            if (type && (difficulty === undefined || difficulty === null)) {
-                 // Random DC between 8 (Very Easy) and 12 (Moderate)
-                 difficulty = 8 + Math.floor(Math.random() * 5);
-            }
-
-            return { ...c, type, difficulty };
-        });
-    }
+    setLastTurnParams({
+        userText,
+        rollResult,
+        customAction,
+        overrideArc,
+        decrementedEffects
+    });
 
     setGameState(prev => {
-        const newItems: InventoryItem[] = (aiResponse.inventory_added || []).map(aiItem => {
-            const factoryItem = createItemFromString(aiItem.name);
-            return {
-                ...factoryItem,
-                description: aiItem.description || factoryItem.description
-            };
-        });
-
-        let removedNames = (aiResponse.inventory_removed || []).map(n => n.toLowerCase());
-        
-        let newEquipped = { ...prev.equipped };
-        let equippedUpdated = false;
-        
-        // --- Calculate final inventory ---
-        let finalInventory = [...prev.inventory];
-        finalInventory = [...finalInventory, ...newItems];
-        finalInventory = finalInventory.filter(item => !removedNames.includes(item.name.toLowerCase()));
-
-        // Enforce 8 item limit
-        if (finalInventory.length > 8) {
-             addLog('error', 'Inventory overflow! Some items were discarded.');
-             finalInventory = finalInventory.slice(0, 8);
-        }
-
-        if (equippedUpdated) {
-            const equippedIds = [
-                newEquipped.weapon?.id, 
-                newEquipped.armor?.id, 
-                newEquipped.accessory?.id
-            ].filter(Boolean);
-            
-            finalInventory = finalInventory.filter(i => !equippedIds.includes(i.id));
-
-            const oldEquippedList = [prev.equipped.weapon, prev.equipped.armor, prev.equipped.accessory].filter(Boolean) as InventoryItem[];
-            
-            oldEquippedList.forEach(oldItem => {
-                const stillEquipped = equippedIds.includes(oldItem.id);
-                const destroyed = removedNames.includes(oldItem.name.toLowerCase());
-                
-                if (!stillEquipped && !destroyed) {
-                    if (!finalInventory.find(i => i.id === oldItem.id)) {
-                        finalInventory.push(oldItem);
-                    }
-                }
-            });
-        }
-        
-        // Check destroyed equipped items
-        if (newEquipped.weapon && removedNames.includes(newEquipped.weapon.name.toLowerCase())) { newEquipped.weapon = null; equippedUpdated = true; }
-        if (newEquipped.armor && removedNames.includes(newEquipped.armor.name.toLowerCase())) { newEquipped.armor = null; equippedUpdated = true; }
-        if (newEquipped.accessory && removedNames.includes(newEquipped.accessory.name.toLowerCase())) { newEquipped.accessory = null; equippedUpdated = true; }
-
-        const hpChange = aiResponse.hp_change || 0;
-        let newHp = Math.min(prev.maxHp, Math.max(0, prev.hp + hpChange));
-        
-        let status = aiResponse.game_status || 'ongoing';
-        if (newHp <= 0) {
-            status = 'lost';
-            newHp = 0;
-        }
-        if (status !== 'ongoing') {
-            setTimeout(() => setGameState(p => ({...p, phase: 'game_over'})), 1000);
-        }
-
-        let newStats = { ...prev.stats };
-        let finalStatsUpdate: Partial<CharacterStats> | undefined = undefined;
-        let finalStatExp = { ...prev.statExperience };
-        
-        if (aiResponse.stats_update) {
-            finalStatsUpdate = {};
-            const keys = Object.keys(aiResponse.stats_update) as Array<keyof CharacterStats>;
-            keys.forEach(key => {
-                let val = aiResponse.stats_update![key] || 0;
-                if (val > 5) val = 5; 
-                if (val < -2) val = -2;
-                if (val !== 0) {
-                    finalStatsUpdate![key] = val;
-                    newStats[key] += val;
-                }
-            });
-            if (Object.keys(finalStatsUpdate).length === 0) finalStatsUpdate = undefined;
-        }
-
-        const brandNewEffects: StatusEffect[] = (aiResponse.new_effects || []).map(e => ({
-            ...e,
-            id: Math.random().toString(36).substring(7)
-        }));
-        
-        const finalActiveEffects = [...prev.activeEffects, ...brandNewEffects];
-
-        // Process NPCs
-        let currentNPCs = [...prev.npcs];
-        const npcAdd = aiResponse.npcs_update?.add || [];
-        const npcUpdate = aiResponse.npcs_update?.update || [];
-        const npcRemove = aiResponse.npcs_update?.remove || [];
-
-        npcAdd.forEach(n => {
-            currentNPCs.push({ ...n, id: Math.random().toString(36).substr(2, 9) } as NPC);
-        });
-
-        npcUpdate.forEach(u => {
-            const index = currentNPCs.findIndex(n => n.name.toLowerCase() === u.name.toLowerCase());
-            if (index !== -1) {
-                currentNPCs[index] = { 
-                    ...currentNPCs[index], 
-                    condition: u.condition as any,
-                    type: u.status ? u.status as any : currentNPCs[index].type
-                };
-            }
-        });
-
-        currentNPCs = currentNPCs.filter(n => !npcRemove.includes(n.name));
-
-        let customActionLevelUp: LevelUpEvent | undefined = undefined;
-        let customActionRollResult: RollResult | undefined = undefined;
-
-        if (aiResponse.action_result) {
-            const { stat, is_success, total, difficulty, base_roll } = aiResponse.action_result;
-            
-            const mod = total - base_roll;
-            customActionRollResult = {
-                statType: stat,
-                total,
-                difficulty,
-                base: base_roll,
-                modifier: mod,
-                isSuccess: is_success
-            };
-
-            if (is_success) {
-                const currentExp = finalStatExp[stat];
-                const nextExp = currentExp + 1;
-                
-                if (nextExp >= EXP_THRESHOLD) {
-                    const oldValue = newStats[stat];
-                    newStats[stat] = oldValue + 1; 
-                    finalStatExp[stat] = 0;
-                    customActionLevelUp = { stat, oldValue, newValue: oldValue + 1 };
-                } else {
-                    finalStatExp[stat] = nextExp;
-                }
-            }
-        }
-
-        const aiTurn: StoryTurn = {
-            id: Date.now().toString() + '-ai',
-            text: aiResponse.narrative,
-            choices: aiResponse.choices,
-            // No per-turn image
-            isUserTurn: false,
-            statsUpdated: finalStatsUpdate, 
-            inventoryAdded: newItems,
-            inventoryRemoved: aiResponse.inventory_removed,
-            newEffects: brandNewEffects.length > 0 ? brandNewEffects : undefined,
-            rollResult: customActionRollResult,
-            levelUpEvent: customActionLevelUp,
-            npcUpdates: npcAdd 
-        };
-
         return {
-            ...prev,
-            history: [...prev.history, aiTurn],
-            inventory: finalInventory,
-            equipped: equippedUpdated ? newEquipped : prev.equipped,
-            activeEffects: finalActiveEffects,
-            currentQuest: aiResponse.quest_update || prev.currentQuest,
-            npcs: currentNPCs,
-            isLoading: false,
-            hp: newHp,
-            hpHistory: [...prev.hpHistory, newHp],
-            stats: newStats,
-            statExperience: finalStatExp,
-            gameStatus: status as any,
-            phase: status === 'ongoing' ? 'playing' : 'game_over'
+          ...prev,
+          history: [...prev.history, userTurn],
+          isLoading: true,
+          activeEffects: decrementedEffects // Update state with decremented effects
         };
     });
 
-    setCurrentChoices(aiResponse.choices || []);
+    // Call the helper
+    generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc, decrementedEffects);
   };
 
   const handleRegenerateImage = () => {
@@ -841,6 +890,7 @@ const App: React.FC = () => {
           target={pendingChoice.difficulty || 10}
           statLabel={pendingChoice.type}
           onComplete={handleRollComplete}
+          precalculatedRoll={pendingRoll || undefined}
         />
       )}
 
@@ -926,7 +976,13 @@ const App: React.FC = () => {
                 <Settings size={20} />
             </button>
 
-            <StoryFeed history={gameState.history} isThinking={gameState.isLoading} />
+            <StoryFeed 
+                history={gameState.history} 
+                isThinking={gameState.isLoading} 
+                onStop={handleStopRequest}
+                onRetry={handleRetryRequest}
+                showRetry={showRetry}
+            />
 
             <div className={`
                 p-4 md:p-6 z-20 sticky bottom-0 transition-all duration-500

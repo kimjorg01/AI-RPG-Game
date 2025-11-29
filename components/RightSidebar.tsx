@@ -373,46 +373,50 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                 <MapIcon size={12} /> Main Story Arc
                             </h3>
                             <div className="relative pl-4 border-l border-zinc-800 space-y-6">
-                                {mainStoryArc.mainQuests.map((quest, idx) => (
-                                    <div key={quest.id} className="relative">
-                                        {/* Timeline Dot */}
-                                        <div className={`
-                                            absolute -left-[21px] top-0 w-2.5 h-2.5 rounded-full border-2 
-                                            ${quest.status === 'completed' ? 'bg-emerald-500 border-emerald-500' : 
-                                              quest.status === 'active' ? 'bg-amber-500 border-amber-500 animate-pulse' : 
-                                              'bg-zinc-900 border-zinc-700'}
-                                        `} />
-                                        
-                                        <div className={`transition-opacity ${quest.status === 'pending' ? 'opacity-50' : 'opacity-100'}`}>
-                                            <div className="text-xs font-bold text-zinc-300 mb-1">
-                                                Act {idx + 1}: {quest.title}
+                                {mainStoryArc.mainQuests.map((quest, idx) => {
+                                    const isRevealed = quest.status === 'completed' || quest.status === 'active';
+                                    
+                                    return (
+                                        <div key={quest.id} className="relative">
+                                            {/* Timeline Dot */}
+                                            <div className={`
+                                                absolute -left-[21px] top-0 w-2.5 h-2.5 rounded-full border-2 
+                                                ${quest.status === 'completed' ? 'bg-emerald-500 border-emerald-500' : 
+                                                quest.status === 'active' ? 'bg-amber-500 border-amber-500 animate-pulse' : 
+                                                'bg-zinc-900 border-zinc-700'}
+                                            `} />
+                                            
+                                            <div className={`transition-opacity ${quest.status === 'pending' ? 'opacity-50' : 'opacity-100'}`}>
+                                                <div className="text-xs font-bold text-zinc-300 mb-1">
+                                                    Act {idx + 1}: {isRevealed ? quest.title : '???'}
+                                                </div>
+                                                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                                                    {isRevealed ? quest.description : 'The path ahead is shrouded in mystery...'}
+                                                </p>
+                                                {quest.status === 'active' && (
+                                                    <span className="inline-block mt-2 text-[9px] font-bold text-amber-500 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-900/50">
+                                                        IN PROGRESS
+                                                    </span>
+                                                )}
+                                                {quest.status === 'completed' && (
+                                                    <span className="inline-block mt-2 text-[9px] font-bold text-emerald-500 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/50">
+                                                        COMPLETED
+                                                    </span>
+                                                )}
                                             </div>
-                                            <p className="text-[10px] text-zinc-500 leading-relaxed">
-                                                {quest.description}
-                                            </p>
-                                            {quest.status === 'active' && (
-                                                <span className="inline-block mt-2 text-[9px] font-bold text-amber-500 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-900/50">
-                                                    IN PROGRESS
-                                                </span>
-                                            )}
-                                            {quest.status === 'completed' && (
-                                                <span className="inline-block mt-2 text-[9px] font-bold text-emerald-500 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/50">
-                                                    COMPLETED
-                                                </span>
-                                            )}
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
 
                                 {/* Final Objective */}
                                 <div className="relative">
                                     <div className="absolute -left-[21px] top-0 w-2.5 h-2.5 rounded-full border-2 bg-zinc-900 border-purple-500" />
                                     <div>
                                         <div className="text-xs font-bold text-purple-400 mb-1">
-                                            Finale: The Ultimate Goal
+                                            Finale: {mainStoryArc.mainQuests.every(q => q.status === 'completed') ? 'The Ultimate Goal' : '???'}
                                         </div>
                                         <p className="text-[10px] text-zinc-500 leading-relaxed">
-                                            {mainStoryArc.finalObjective}
+                                            {mainStoryArc.mainQuests.every(q => q.status === 'completed') ? mainStoryArc.finalObjective : 'Complete the journey to reveal your destiny.'}
                                         </p>
                                     </div>
                                 </div>

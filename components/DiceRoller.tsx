@@ -6,9 +6,10 @@ interface DiceRollerProps {
   target: number; // The DC
   statLabel: string;
   onComplete: (total: number) => void;
+  precalculatedRoll?: number;
 }
 
-export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLabel, onComplete }) => {
+export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLabel, onComplete, precalculatedRoll }) => {
   const [currentNumber, setCurrentNumber] = useState(1);
   const [isRolling, setIsRolling] = useState(true);
   const [phase, setPhase] = useState<'spin' | 'slow' | 'result'>('spin');
@@ -16,14 +17,14 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLa
 
   useEffect(() => {
     // 1. Determine outcome immediately (hidden from user)
-    const rawRoll = Math.floor(Math.random() * 20) + 1;
+    const rawRoll = precalculatedRoll !== undefined ? precalculatedRoll : (Math.floor(Math.random() * 20) + 1);
     const calculatedTotal = rawRoll + modifier;
     
     // 2. Animation Variables
     let timeoutId: number;
     let frameId: number;
     let startTime = Date.now();
-    let duration = 1500; // Base spin duration
+    let duration = 2500; // Base spin duration
     let speed = 50; // Initial speed (ms per number switch)
     
     // Physics decay function
