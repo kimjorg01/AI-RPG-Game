@@ -1,7 +1,7 @@
 
 import React, { useRef } from 'react';
 import { AppSettings, ImageSize, StoryModel, UIScale } from '../types';
-import { X, Settings, Image as ImageIcon, Zap, Brain, Save, Upload, RotateCcw, AlertTriangle, Monitor, ZoomIn, Activity, BrainCircuit } from 'lucide-react';
+import { X, Settings, Image as ImageIcon, Zap, Brain, Save, Upload, RotateCcw, AlertTriangle, Monitor, ZoomIn, Activity, BrainCircuit, Dices } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -95,6 +95,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                <RotateCcw size={16} />
                <span className="text-xs font-bold">Reset Campaign</span>
              </button>
+          </div>
+
+          {/* Gameplay Settings */}
+          <div className="pb-6 border-b border-zinc-800">
+             <h3 className="font-bold text-zinc-200 text-sm uppercase tracking-wider mb-2 flex items-center gap-2">
+                 <Dices size={16} /> Gameplay
+             </h3>
+             <div className="flex items-center justify-between bg-zinc-800 p-3 rounded border border-zinc-700">
+                 <div className="flex flex-col">
+                     <span className="text-sm font-bold text-zinc-200">Enable Dice Rolling</span>
+                     <span className="text-xs text-zinc-500">If disabled, choices succeed automatically without skill checks.</span>
+                 </div>
+                 <button
+                    onClick={() => onUpdateSettings({ ...settings, enableDiceRolls: !settings.enableDiceRolls })}
+                    className={`relative w-12 h-6 rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settings.enableDiceRolls ? 'bg-amber-600' : 'bg-zinc-600'
+                    }`}
+                 >
+                     <span
+                        className={`absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform duration-200 ease-in-out ${
+                            settings.enableDiceRolls ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                     />
+                 </button>
+             </div>
           </div>
 
           {/* UI Scaling */}

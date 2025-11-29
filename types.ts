@@ -54,7 +54,21 @@ export interface NPC {
 }
 
 export type GameStatus = 'ongoing' | 'won' | 'lost';
-export type GamePhase = 'menu' | 'setup_genre' | 'setup_stats' | 'playing' | 'game_over';
+export type GamePhase = 'menu' | 'setup_genre' | 'setup_stats' | 'creating_world' | 'playing' | 'game_over';
+
+export interface MainQuest {
+    id: string;
+    title: string;
+    description: string;
+    status: 'active' | 'completed' | 'pending';
+}
+
+export interface MainStoryArc {
+    campaignTitle: string;
+    backgroundLore: string;
+    mainQuests: MainQuest[];
+    finalObjective: string;
+}
 
 export interface ChoiceData {
   text: string;
@@ -92,6 +106,7 @@ export interface GameState {
   finalSummary?: string; // AI generated summary
   finalStoryboard?: string; // The 10-panel comic image
   customChoicesRemaining: number; // Limit 3 per game
+  mainStoryArc?: MainStoryArc;
 }
 
 export interface StoryTurn {
@@ -163,6 +178,7 @@ export interface AppSettings {
   imageSize: ImageSize;
   storyModel: StoryModel;
   uiScale: UIScale;
+  enableDiceRolls: boolean;
 }
 
 export interface SaveData {

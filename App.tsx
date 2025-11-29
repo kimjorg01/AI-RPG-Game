@@ -10,11 +10,11 @@ import { DiceRoller } from './components/DiceRoller';
 import { MainMenu } from './components/MainMenu';
 import { GameOverScreen } from './components/GameOverScreen';
 import { CustomChoiceModal } from './components/CustomChoiceModal';
-import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale } from './types';
-import { generateStoryStep, generateGameSummary, generateStoryboard } from './services/gemini';
+import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale, MainStoryArc } from './types';
+import { generateStoryStep, generateGameSummary, generateStoryboard, generateMainStory } from './services/gemini';
 import { createItemFromString } from './services/itemFactory';
 import { inferStatFromText } from './services/statInference';
-import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal } from 'lucide-react';
+import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal, Loader2 } from 'lucide-react';
 import { DebugConsole, LogEntry } from './components/DebugConsole';
 
 const BASE_HP = 100;
@@ -91,7 +91,8 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>({
     imageSize: ImageSize.Size_2K,
     storyModel: StoryModel.Smart,
-    uiScale: UIScale.Normal
+    uiScale: UIScale.Normal,
+    enableDiceRolls: true
   });
 
   const [showSettings, setShowSettings] = useState(false);
@@ -285,15 +286,27 @@ const App: React.FC = () => {
         ...prev, 
         stats, 
         startingStats: stats, 
-        phase: 'playing' 
+        phase: 'creating_world' 
     }));
-    processTurn("Begin the adventure.", null, null);
+    
+    // Trigger world generation
+    generateMainStory(gameState.genre, stats, settings.storyModel, addLog)
+        .then(arc => {
+            setGameState(prev => ({ ...prev, mainStoryArc: arc, phase: 'playing' }));
+            processTurn("Begin the adventure.", null, null, undefined, arc);
+        })
+        .catch(err => {
+            addLog('error', err);
+            // Fallback if generation fails
+            setGameState(prev => ({ ...prev, phase: 'playing' }));
+            processTurn("Begin the adventure.", null, null);
+        });
   };
 
   const handleChoiceClick = (choice: ChoiceData) => {
     if (gameState.isLoading || gameState.isRolling) return;
 
-    if (choice.difficulty && choice.type) {
+    if (settings.enableDiceRolls && choice.difficulty && choice.type) {
       setPendingChoice(choice);
       setGameState(prev => ({ ...prev, isRolling: true }));
     } else {
@@ -379,7 +392,8 @@ const App: React.FC = () => {
       userText: string, 
       rollResult: RollResult | null, 
       customAction: { text: string, item: string, roll: number } | null,
-      levelUpEvent?: LevelUpEvent
+      levelUpEvent?: LevelUpEvent,
+      overrideArc?: MainStoryArc
   ) => {
     
     const userTurn: StoryTurn = {
@@ -433,7 +447,8 @@ const App: React.FC = () => {
       rollResult,
       customAction,
       settings.storyModel,
-      addLog // Pass logger
+      addLog, // Pass logger
+      overrideArc || gameState.mainStoryArc
     );
 
     // Sanitize choices: 
@@ -822,6 +837,23 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {gameState.phase === 'creating_world' && (
+        <div className="flex flex-col items-center justify-center h-full space-y-6 animate-in fade-in duration-500 bg-zinc-950 w-full">
+            <div className="relative">
+                <div className="absolute inset-0 bg-purple-500/20 blur-xl rounded-full animate-pulse" />
+                <Sparkles className="w-16 h-16 text-purple-400 animate-spin-slow relative z-10" />
+            </div>
+            <div className="text-center space-y-2">
+                <h2 className="text-2xl font-bold text-white">Forging Your Destiny...</h2>
+                <p className="text-zinc-400">The AI is crafting a unique campaign for your hero.</p>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-zinc-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Generating Lore & Quests</span>
+            </div>
+        </div>
+      )}
+
       {/* --- Main Gameplay UI --- */}
       {(gameState.phase === 'playing' || gameState.phase === 'game_over') && (
         <>
@@ -887,7 +919,7 @@ const App: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {currentChoices.map((choice, idx) => {
                             const statVal = choice.type ? currentStats[choice.type] : 0;
-                            const risk = (choice.type && choice.difficulty) 
+                            const risk = (settings.enableDiceRolls && choice.type && choice.difficulty) 
                                 ? getRiskAssessment(choice.difficulty, statVal) 
                                 : null;
                             
@@ -913,7 +945,7 @@ const App: React.FC = () => {
                                 >
                                      <div className="p-4 pb-8 relative z-10">
                                         {/* Stat Label Badge (Top Left) */}
-                                        {choice.type && (
+                                        {settings.enableDiceRolls && choice.type && (
                                             <div className={`mb-1 text-[9px] font-bold uppercase tracking-widest opacity-60 flex items-center gap-1 ${statConfig?.color}`}>
                                                 <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
                                                 {statConfig?.label} Check
@@ -1009,6 +1041,7 @@ const App: React.FC = () => {
             onUnequip={handleUnequip}
             onDiscard={handleDiscard}
             setDraggedItemType={setDraggedItemType}
+            mainStoryArc={gameState.mainStoryArc}
           />
         </>
       )}

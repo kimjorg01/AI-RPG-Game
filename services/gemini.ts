@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect, NPC } from "../types";
+import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect, NPC, MainStoryArc } from "../types";
 
 const getAIClient = () => {
   const apiKey = process.env.API_KEY;
@@ -51,6 +51,69 @@ const formatNPCs = (npcs: NPC[]) => {
     return npcs.map(n => `${n.name} (${n.type}): ${n.condition}`).join(', ');
 };
 
+export const generateMainStory = async (
+    genre: string,
+    stats: CharacterStats,
+    modelName: StoryModel,
+    onLog?: (type: 'request' | 'response' | 'error', content: any) => void
+): Promise<MainStoryArc> => {
+    const ai = getAIClient();
+    const prompt = `
+    Create a unique, high-stakes RPG campaign outline based on the following:
+    Genre: ${genre}
+    Hero Stats: High ${Object.entries(stats).reduce((a, b) => a[1] > b[1] ? a : b)[0]} (Focus on this playstyle).
+
+    Return a JSON object with:
+    1. "campaignTitle": A catchy name for the adventure.
+    2. "backgroundLore": A short paragraph setting the scene (the world state, the threat).
+    3. "mainQuests": An array of exactly 3 objects, each with "id" (1, 2, 3), "title", "description", and "status" (set first to 'active', others 'pending'). These should lead progressively to the finale.
+    4. "finalObjective": The ultimate win condition.
+    `;
+
+    if (onLog) onLog('request', prompt);
+
+    try {
+        const actualModel = modelName === StoryModel.SmartLowThinking ? StoryModel.Smart : modelName;
+        const thinkingConfig = modelName === StoryModel.SmartLowThinking ? { thinkingLevel: "low" as any } : undefined;
+
+        const response = await ai.models.generateContent({
+            model: actualModel,
+            contents: { parts: [{ text: prompt }] },
+            config: {
+                thinkingConfig,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        campaignTitle: { type: Type.STRING },
+                        backgroundLore: { type: Type.STRING },
+                        mainQuests: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING },
+                                    title: { type: Type.STRING },
+                                    description: { type: Type.STRING },
+                                    status: { type: Type.STRING, enum: ['active', 'pending'] }
+                                }
+                            }
+                        },
+                        finalObjective: { type: Type.STRING }
+                    }
+                }
+            }
+        });
+
+        const text = response.text;
+        if (onLog) onLog('response', text);
+        return JSON.parse(text || "{}");
+    } catch (error) {
+        if (onLog) onLog('error', error);
+        throw error;
+    }
+};
+
 export const generateStoryStep = async (
   previousHistory: string,
   userChoice: string,
@@ -65,7 +128,8 @@ export const generateStoryStep = async (
   rollResult: RollResult | null,
   customAction: { text: string, item: string, roll: number } | null,
   modelName: StoryModel = StoryModel.Smart,
-  onLog?: (type: 'request' | 'response' | 'error', content: any) => void
+  onLog?: (type: 'request' | 'response' | 'error', content: any) => void,
+  mainStoryArc?: MainStoryArc
 ): Promise<AIStoryResponse> => {
   const ai = getAIClient();
   
@@ -124,6 +188,16 @@ export const generateStoryStep = async (
     
     ${actionDescription}
     
+    ${mainStoryArc ? `
+    --- CAMPAIGN CONTEXT ---
+    Title: ${mainStoryArc.campaignTitle}
+    Lore: ${mainStoryArc.backgroundLore}
+    Current Main Objective: ${mainStoryArc.mainQuests.find(q => q.status === 'active')?.description || mainStoryArc.finalObjective}
+    Final Goal: ${mainStoryArc.finalObjective}
+    Ensure the narrative steers towards these objectives.
+    ------------------------
+    ` : ''}
+
     Generate the next segment.
   `;
 

@@ -24,7 +24,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { InventoryItem, EquippedGear, ItemType, NPC } from '../types';
+import { InventoryItem, EquippedGear, ItemType, NPC, MainStoryArc } from '../types';
 
 interface RightSidebarProps {
   currentQuest: string;
@@ -36,6 +36,7 @@ interface RightSidebarProps {
   onUnequip: (item: InventoryItem) => void;
   onDiscard: (item: InventoryItem) => void;
   setDraggedItemType: (type: string | null) => void;
+  mainStoryArc?: MainStoryArc;
 }
 
 const getIconForItem = (name: string, type: ItemType) => {
@@ -70,11 +71,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   onEquip,
   onUnequip,
   onDiscard,
-  setDraggedItemType
+  setDraggedItemType,
+  mainStoryArc
 }) => {
   
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(true);
 
   const handleDragStart = (e: React.DragEvent, item: InventoryItem) => {
     e.dataTransfer.setData('itemId', item.id);
@@ -110,7 +112,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   const handleDragLeave = () => setIsDraggingOver(false);
 
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<'journal' | 'people'>('journal');
+  const [activeTab, setActiveTab] = useState<'items' | 'story' | 'people'>('items');
 
   return (
     <aside 
@@ -163,14 +165,24 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         {/* Tabs */}
         <div className="flex border-b border-zinc-800">
             <button
-                onClick={() => setActiveTab('journal')}
+                onClick={() => setActiveTab('items')}
                 className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ${
-                    activeTab === 'journal' 
+                    activeTab === 'items' 
                     ? 'bg-zinc-900/50 text-amber-500 border-b-2 border-amber-500' 
                     : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'
                 }`}
             >
-                Journal
+                Items
+            </button>
+            <button
+                onClick={() => setActiveTab('story')}
+                className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ${
+                    activeTab === 'story' 
+                    ? 'bg-zinc-900/50 text-amber-500 border-b-2 border-amber-500' 
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'
+                }`}
+            >
+                Story
             </button>
             <button
                 onClick={() => setActiveTab('people')}
@@ -186,26 +198,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
 
         <div className="p-4 flex flex-col gap-6 h-full overflow-y-auto custom-scrollbar">
         
-        {activeTab === 'journal' && (
+        {activeTab === 'items' && (
             <>
                 {/* Header */}
                 <div className="flex items-center gap-2 text-amber-500 mb-2 justify-end">
                     <div className="text-right">
-                        <h1 className="cinzel font-bold text-lg leading-none">Journal</h1>
-                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Quests & Items</p>
+                        <h1 className="cinzel font-bold text-lg leading-none">Inventory</h1>
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Gear & Loot</p>
                     </div>
                     <Backpack size={24} />
-                </div>
-
-                {/* Quest Section */}
-                <div className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-800 shadow-inner">
-                <h2 className="text-amber-400 font-bold mb-3 flex items-center gap-2 cinzel text-xs uppercase tracking-widest">
-                    <ScrollText size={14} />
-                    Current Objective
-                </h2>
-                <p className="text-zinc-300 text-sm leading-relaxed italic border-l-2 border-amber-900/50 pl-3">
-                    "{currentQuest || 'Explore the world to find your purpose...'}"
-                </p>
                 </div>
 
                 {/* Inventory Section */}
@@ -306,6 +307,97 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                 <div className="text-[10px] text-zinc-800 text-center mt-auto opacity-50 hover:opacity-100 transition-opacity pb-2">
                     Drag items to equip/unequip
                 </div>
+            </>
+        )}
+
+        {activeTab === 'story' && (
+            <>
+                {/* Header */}
+                <div className="flex items-center gap-2 text-amber-500 mb-2 justify-end">
+                    <div className="text-right">
+                        <h1 className="cinzel font-bold text-lg leading-none">Quest Log</h1>
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Campaign Progress</p>
+                    </div>
+                    <ScrollText size={24} />
+                </div>
+
+                {/* Current Objective (Immediate) */}
+                <div className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-800 shadow-inner">
+                    <h2 className="text-amber-400 font-bold mb-3 flex items-center gap-2 cinzel text-xs uppercase tracking-widest">
+                        <MousePointer2 size={14} />
+                        Current Focus
+                    </h2>
+                    <p className="text-zinc-300 text-sm leading-relaxed italic border-l-2 border-amber-900/50 pl-3">
+                        "{currentQuest || 'Explore the world to find your purpose...'}"
+                    </p>
+                </div>
+
+                {mainStoryArc ? (
+                    <div className="space-y-4">
+                        {/* Campaign Info */}
+                        <div className="bg-zinc-900/30 p-3 rounded border border-zinc-800/50">
+                            <h3 className="text-zinc-400 font-bold text-xs uppercase tracking-wider mb-1">Campaign</h3>
+                            <div className="text-amber-500 font-bold cinzel">{mainStoryArc.campaignTitle}</div>
+                            <p className="text-xs text-zinc-500 mt-2 leading-relaxed">{mainStoryArc.backgroundLore}</p>
+                        </div>
+
+                        {/* Main Quests */}
+                        <div className="space-y-2">
+                            <h3 className="text-zinc-400 font-bold text-xs uppercase tracking-wider flex items-center gap-2">
+                                <MapIcon size={12} /> Main Story Arc
+                            </h3>
+                            <div className="relative pl-4 border-l border-zinc-800 space-y-6">
+                                {mainStoryArc.mainQuests.map((quest, idx) => (
+                                    <div key={quest.id} className="relative">
+                                        {/* Timeline Dot */}
+                                        <div className={`
+                                            absolute -left-[21px] top-0 w-2.5 h-2.5 rounded-full border-2 
+                                            ${quest.status === 'completed' ? 'bg-emerald-500 border-emerald-500' : 
+                                              quest.status === 'active' ? 'bg-amber-500 border-amber-500 animate-pulse' : 
+                                              'bg-zinc-900 border-zinc-700'}
+                                        `} />
+                                        
+                                        <div className={`transition-opacity ${quest.status === 'pending' ? 'opacity-50' : 'opacity-100'}`}>
+                                            <div className="text-xs font-bold text-zinc-300 mb-1">
+                                                Act {idx + 1}: {quest.title}
+                                            </div>
+                                            <p className="text-[10px] text-zinc-500 leading-relaxed">
+                                                {quest.description}
+                                            </p>
+                                            {quest.status === 'active' && (
+                                                <span className="inline-block mt-2 text-[9px] font-bold text-amber-500 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-900/50">
+                                                    IN PROGRESS
+                                                </span>
+                                            )}
+                                            {quest.status === 'completed' && (
+                                                <span className="inline-block mt-2 text-[9px] font-bold text-emerald-500 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/50">
+                                                    COMPLETED
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* Final Objective */}
+                                <div className="relative">
+                                    <div className="absolute -left-[21px] top-0 w-2.5 h-2.5 rounded-full border-2 bg-zinc-900 border-purple-500" />
+                                    <div>
+                                        <div className="text-xs font-bold text-purple-400 mb-1">
+                                            Finale: The Ultimate Goal
+                                        </div>
+                                        <p className="text-[10px] text-zinc-500 leading-relaxed">
+                                            {mainStoryArc.finalObjective}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="text-center py-8 text-zinc-600 text-xs italic">
+                        No main story arc generated yet.
+                    </div>
+                )}
             </>
         )}
 
