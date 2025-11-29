@@ -33,6 +33,7 @@ interface LeftSidebarProps {
   onEquip: (item: InventoryItem) => void;
   onUnequip?: (item: InventoryItem) => void; // Added optional handler
   highlightedStat?: StatType | null;
+  draggedItemType?: string | null;
 }
 
 const getMod = (score: number) => Math.floor((score - 10) / 2);
@@ -125,7 +126,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   isOpen,
   onEquip,
   onUnequip,
-  highlightedStat
+  highlightedStat,
+  draggedItemType
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<0 | 1>(0);
@@ -360,6 +362,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             { slot: 'accessory', label: 'Trinket', icon: Gem, color: 'text-purple-500' }
                         ].map(({ slot, label, icon: Icon, color }) => {
                             const item = equipped[slot as keyof EquippedGear];
+                            const isTarget = draggedItemType === slot;
                             
                             return (
                                 <div 
@@ -369,7 +372,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                                     className={`min-h-[50px] rounded flex flex-row items-center transition-all duration-200 group/slot relative
                                         ${item 
                                             ? 'bg-zinc-900 border border-zinc-700 p-2 gap-3 shadow-sm' 
-                                            : 'bg-transparent border border-transparent border-dashed hover:border-zinc-800 hover:bg-zinc-900/30 p-1 gap-2 opacity-50 hover:opacity-100'
+                                            : isTarget 
+                                                ? 'bg-amber-900/20 border-2 border-amber-500 border-dashed p-1 gap-2 animate-pulse shadow-[0_0_15px_rgba(245,158,11,0.3)]'
+                                                : 'bg-transparent border border-transparent border-dashed hover:border-zinc-800 hover:bg-zinc-900/30 p-1 gap-2 opacity-50 hover:opacity-100'
                                         }
                                     `}
                                 >

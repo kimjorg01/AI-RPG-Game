@@ -35,6 +35,7 @@ interface RightSidebarProps {
   onEquip: (item: InventoryItem) => void;
   onUnequip: (item: InventoryItem) => void;
   onDiscard: (item: InventoryItem) => void;
+  setDraggedItemType: (type: string | null) => void;
 }
 
 const getIconForItem = (name: string, type: ItemType) => {
@@ -68,7 +69,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   isOpen,
   onEquip,
   onUnequip,
-  onDiscard
+  onDiscard,
+  setDraggedItemType
 }) => {
   
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -78,6 +80,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
     e.dataTransfer.setData('itemId', item.id);
     e.dataTransfer.setData('origin', 'inventory');
     e.dataTransfer.setData('itemType', item.type);
+    setDraggedItemType(item.type);
+  };
+
+  const handleDragEnd = () => {
+      setDraggedItemType(null);
   };
 
   const handleDropOnInventory = (e: React.DragEvent) => {
@@ -252,6 +259,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                                     <div 
                                                         draggable
                                                         onDragStart={(e) => handleDragStart(e, item)}
+                                                        onDragEnd={handleDragEnd}
                                                         className="flex-1 flex items-center px-2 gap-2 cursor-grab active:cursor-grabbing"
                                                     >
                                                         <div className="text-zinc-500 shrink-0">

@@ -101,6 +101,9 @@ const App: React.FC = () => {
   const [currentChoices, setCurrentChoices] = useState<ChoiceData[]>([]);
   const [hasApiKey, setHasApiKey] = useState(false);
   
+  // Drag and Drop State
+  const [draggedItemType, setDraggedItemType] = useState<string | null>(null);
+  
   // Debug Console State
   const [showDebug, setShowDebug] = useState(false);
   const [debugLogs, setDebugLogs] = useState<LogEntry[]>([]);
@@ -849,6 +852,7 @@ const App: React.FC = () => {
             onEquip={handleEquip}
             onUnequip={handleUnequip}
             highlightedStat={hoveredStat}
+            draggedItemType={draggedItemType}
           />
 
           <main className="flex-1 flex flex-col relative w-full h-full max-w-5xl mx-auto bg-zinc-950 border-x border-zinc-900 shadow-2xl z-10">
@@ -860,7 +864,26 @@ const App: React.FC = () => {
             `}>
               <div className="max-w-4xl mx-auto">
                  {gameState.phase !== 'game_over' ? (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-4 relative">
+                        
+                        {/* Trash Bin Drop Zone */}
+                        {draggedItemType && (
+                            <div 
+                                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-64 h-24 border-2 border-dashed border-red-500/50 bg-red-950/20 rounded-xl flex flex-col items-center justify-center text-red-500 animate-pulse z-50 backdrop-blur-sm"
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                    e.preventDefault();
+                                    const itemId = e.dataTransfer.getData('itemId');
+                                    const item = gameState.inventory.find(i => i.id === itemId);
+                                    if (item) handleDiscard(item);
+                                    setDraggedItemType(null);
+                                }}
+                            >
+                                <Skull size={32} />
+                                <span className="font-bold uppercase tracking-widest text-xs mt-2">Drop to Discard</span>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {currentChoices.map((choice, idx) => {
                             const statVal = choice.type ? currentStats[choice.type] : 0;
@@ -985,6 +1008,7 @@ const App: React.FC = () => {
             onEquip={handleEquip}
             onUnequip={handleUnequip}
             onDiscard={handleDiscard}
+            setDraggedItemType={setDraggedItemType}
           />
         </>
       )}
