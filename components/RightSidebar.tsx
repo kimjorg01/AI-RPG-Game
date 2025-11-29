@@ -24,7 +24,10 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowUpCircle,
-  Sparkles
+  Sparkles,
+  CheckCircle2,
+  Gift,
+  RefreshCw
 } from 'lucide-react';
 import { InventoryItem, EquippedGear, ItemType, NPC, MainStoryArc, SideQuest } from '../types';
 
@@ -43,6 +46,8 @@ interface RightSidebarProps {
   mainStoryArc?: MainStoryArc;
   onHoverItem?: (item: InventoryItem | null) => void;
   sideQuests?: SideQuest[];
+  onAcceptQuest?: (questId: string) => void;
+  onCollectReward?: (questId: string) => void;
 }
 
 const getIconForItem = (name: string, type: ItemType) => {
@@ -69,6 +74,21 @@ const getNPCIcon = (type: string, condition: string) => {
     return <Users size={14} className="text-zinc-400" />;
 };
 
+const getRewardLabel = (quest: SideQuest) => {
+    switch (quest.reward) {
+        case 'level_up': return "Level Up";
+        case 'heal_hp': return `Heal ${quest.rewardValue || 0} HP`;
+        case 'restore_custom_choice': return "Restore Heroic Action";
+        case 'item': return quest.rewardItem ? quest.rewardItem.name : "Rare Item";
+        case 'max_hp_boost': return `+${quest.rewardValue || 0} Max HP`;
+        case 'heroic_refill': return "Refill Heroic Actions";
+        case 'reroll_token': return "Token of Fate";
+        case 'upgrade_equipped': return "Upgrade Weapon";
+        case 'legendary_item': return "Legendary Item";
+        default: return "Unknown Reward";
+    }
+};
+
 export const RightSidebar: React.FC<RightSidebarProps> = ({ 
   currentQuest, 
   inventory,
@@ -82,7 +102,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   draggedItemType,
   mainStoryArc,
   onHoverItem,
-  sideQuests = []
+  sideQuests = [],
+  onAcceptQuest,
+  onCollectReward
 }) => {
   
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -123,7 +145,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   const handleDragLeave = () => setIsDraggingOver(false);
 
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<'items' | 'story' | 'people'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'story' | 'people' | 'quests'>('items');
 
   return (
     <aside 
@@ -186,6 +208,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                 Items
             </button>
             <button
+                onClick={() => setActiveTab('quests')}
+                className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ${
+                    activeTab === 'quests' 
+                    ? 'bg-zinc-900/50 text-amber-500 border-b-2 border-amber-500' 
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'
+                }`}
+            >
+                Quests
+            </button>
+            <button
                 onClick={() => setActiveTab('story')}
                 className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ${
                     activeTab === 'story' 
@@ -218,58 +250,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                         <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Gear & Loot</p>
                     </div>
                     <Backpack size={24} />
-                </div>
-
-                {/* Side Quests Section */}
-                <div className="bg-zinc-900/50 rounded-lg border border-zinc-800 overflow-hidden shrink-0 mb-4">
-                    <button 
-                        onClick={() => setIsQuestsOpen(!isQuestsOpen)}
-                        className="w-full p-3 flex items-center justify-between bg-zinc-900 hover:bg-zinc-800 transition-colors group"
-                    >
-                        <div className="flex items-center gap-2 text-zinc-400 font-bold cinzel uppercase tracking-widest text-xs group-hover:text-zinc-300">
-                            <ScrollText size={14} />
-                            Bounties ({sideQuests.length})
-                        </div>
-                        {isQuestsOpen ? <ChevronUp size={14} className="text-zinc-500" /> : <ChevronDown size={14} className="text-zinc-500" />}
-                    </button>
-                    
-                    {isQuestsOpen && (
-                        <div className="p-3 bg-zinc-950/50 space-y-2">
-                            {sideQuests.length > 0 ? sideQuests.map(quest => (
-                                <div key={quest.id} className="bg-zinc-900 border border-zinc-800 rounded p-2 relative overflow-hidden">
-                                    <div className="flex justify-between items-start mb-1 relative z-10">
-                                        <span className="text-[10px] font-bold text-zinc-300">{quest.title}</span>
-                                        <div className="flex items-center gap-1 text-[9px] font-mono text-amber-500 bg-amber-950/30 px-1.5 rounded border border-amber-900/30">
-                                            {quest.reward === 'level_up' && <ArrowUpCircle size={8} />}
-                                            {quest.reward === 'heal_hp' && <FlaskConical size={8} />}
-                                            {quest.reward === 'restore_custom_choice' && <Sparkles size={8} />}
-                                            <span>
-                                                {quest.reward === 'level_up' ? 'LVL UP' : 
-                                                 quest.reward === 'heal_hp' ? `+${quest.rewardValue} HP` : 
-                                                 '+1 ACT'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <p className="text-[9px] text-zinc-500 mb-2 relative z-10">{quest.description}</p>
-                                    
-                                    {/* Progress Bar */}
-                                    <div className="h-1.5 w-full bg-zinc-950 rounded-full overflow-hidden relative z-10 border border-zinc-800">
-                                        <div 
-                                            className="h-full bg-amber-600 transition-all duration-500"
-                                            style={{ width: `${(quest.progress / quest.target) * 100}%` }}
-                                        />
-                                    </div>
-                                    <div className="text-[8px] text-zinc-600 text-right mt-0.5 font-mono relative z-10">
-                                        {quest.progress} / {quest.target}
-                                    </div>
-                                </div>
-                            )) : (
-                                <div className="text-center py-4 text-zinc-600 text-[10px] italic">
-                                    No active bounties.
-                                </div>
-                            )}
-                        </div>
-                    )}
                 </div>
 
                 {/* Inventory Section */}
@@ -496,6 +476,112 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                         No main story arc generated yet.
                     </div>
                 )}
+            </>
+        )}
+
+        {activeTab === 'quests' && (
+            <>
+                {/* Header */}
+                <div className="flex items-center gap-2 text-amber-500 mb-2 justify-end">
+                    <div className="text-right">
+                        <h1 className="cinzel font-bold text-lg leading-none">Quests</h1>
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Side Objectives</p>
+                    </div>
+                    <ScrollText size={24} />
+                </div>
+
+                <div className="flex flex-col gap-3">
+                    {Array.isArray(sideQuests) && sideQuests.length > 0 ? (
+                        sideQuests.map((quest) => {
+                            if (!quest) return null; // Safety check
+                            
+                            const isCompleted = quest.status === 'completed';
+                            const isActive = quest.status === 'active';
+                            const isAvailable = quest.status === 'available';
+                            
+                            // Calculate percentage safely
+                            const percentage = quest.target > 0 
+                                ? Math.min(100, Math.max(0, (quest.progress / quest.target) * 100)) 
+                                : 0;
+
+                            return (
+                                <div 
+                                    key={quest.id || Math.random()} // Fallback key
+                                    className={`
+                                        p-3 rounded-lg border transition-all relative overflow-hidden
+                                        ${isCompleted 
+                                            ? 'bg-emerald-950/20 border-emerald-500/50' 
+                                            : isActive
+                                                ? 'bg-zinc-900 border-amber-500/30'
+                                                : 'bg-zinc-900/50 border-zinc-800 opacity-80 hover:opacity-100'
+                                        }
+                                    `}
+                                >
+                                    {/* Title Row */}
+                                    <div className="flex justify-between items-start mb-1">
+                                        <h3 className={`text-xs font-bold ${isCompleted ? 'text-emerald-400' : 'text-zinc-200'}`}>
+                                            {quest.title || 'Unknown Quest'}
+                                        </h3>
+                                        {isCompleted && <CheckCircle2 size={14} className="text-emerald-500" />}
+                                        {isAvailable && <span className="text-[9px] text-zinc-500 italic">Available</span>}
+                                    </div>
+                                    
+                                    {/* Description */}
+                                    <p className="text-[10px] text-zinc-400 mb-2 leading-snug">
+                                        {quest.description || 'No description.'}
+                                    </p>
+                                    
+                                    {/* Progress Bar (Active/Completed only) */}
+                                    {!isAvailable && (
+                                        <div className="w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden mb-2 border border-zinc-800">
+                                            <div 
+                                                className={`h-full transition-all duration-500 ${isCompleted ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                                style={{ width: `${percentage}%` }}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Reward Label */}
+                                    <div className="flex items-center gap-1.5 text-[9px] text-zinc-500 mb-2">
+                                        <Gift size={10} className="text-amber-500" />
+                                        <span>
+                                            {getRewardLabel(quest)}
+                                        </span>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex justify-end">
+                                        {isAvailable && onAcceptQuest && (
+                                            <button 
+                                                onClick={() => onAcceptQuest(quest.id)}
+                                                className="px-3 py-1 bg-amber-900/30 hover:bg-amber-900/50 text-amber-500 border border-amber-900/50 rounded text-[10px] font-bold uppercase tracking-wider transition-colors"
+                                            >
+                                                Accept
+                                            </button>
+                                        )}
+                                        {isCompleted && onCollectReward && (
+                                            <button 
+                                                onClick={() => onCollectReward(quest.id)}
+                                                className="px-3 py-1 bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-500 border border-emerald-900/50 rounded text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1"
+                                            >
+                                                <Sparkles size={10} /> Collect
+                                            </button>
+                                        )}
+                                        {isActive && (
+                                            <span className="text-[9px] text-zinc-600 font-mono">
+                                                {quest.progress} / {quest.target}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })
+                    ) : (
+                        <div className="text-center py-8 text-zinc-600 text-xs italic">
+                            No quests available.
+                        </div>
+                    )}
+                </div>
             </>
         )}
 

@@ -96,8 +96,8 @@ export interface RollResult {
   difficulty: number;
 }
 
-export type QuestType = 'roll_streak' | 'turn_count' | 'hp_threshold' | 'stat_check_count' | 'inventory_count' | 'any_success_roll' | 'stat_success_count';
-export type QuestRewardType = 'level_up' | 'heal_hp' | 'restore_custom_choice' | 'item';
+export type QuestType = 'roll_streak' | 'turn_count' | 'hp_threshold' | 'stat_check_count' | 'inventory_count' | 'any_success_roll' | 'stat_success_count' | 'natural_20' | 'close_call' | 'fully_equipped';
+export type QuestRewardType = 'level_up' | 'heal_hp' | 'restore_custom_choice' | 'item' | 'max_hp_boost' | 'reroll_token' | 'upgrade_equipped' | 'legendary_item' | 'heroic_refill';
 
 export interface SideQuest {
     id: string;
@@ -110,7 +110,7 @@ export interface SideQuest {
     rewardValue?: number;
     statTarget?: StatType; 
     rewardItem?: InventoryItem;
-    isCompleted: boolean;
+    status: 'available' | 'active' | 'completed';
 }
 
 export type GameLength = 'short' | 'medium' | 'long';
@@ -140,6 +140,7 @@ export interface GameState {
   mainStoryArc?: MainStoryArc;
   activeSideQuests: SideQuest[];
   pendingLevelUps: number;
+  rerollTokens: number;
 }
 
 export interface StoryTurn {

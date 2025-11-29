@@ -105,7 +105,8 @@ const App: React.FC = () => {
     startingStats: DEFAULT_STATS,
     customChoicesRemaining: 3,
     activeSideQuests: [],
-    pendingLevelUps: 0
+    pendingLevelUps: 0,
+    rerollTokens: 0
   });
 
   const [settings, setSettings] = useState<AppSettings>({
@@ -851,76 +852,125 @@ const App: React.FC = () => {
     generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc);
   };
 
+  // --- Quest Handlers ---
+  const handleAcceptQuest = (questId: string) => {
+    setGameState(prev => {
+      const newQuests = prev.activeSideQuests.map(q => 
+        q.id === questId ? { ...q, status: 'active' as const } : q
+      );
+      return { ...prev, activeSideQuests: newQuests };
+    });
+    addLog('info', 'Quest Accepted!');
+  };
+
+  const handleCollectReward = (questId: string) => {
+    setGameState(prev => {
+      const quest = prev.activeSideQuests.find(q => q.id === questId);
+      if (!quest || quest.status !== 'completed') return prev;
+
+      let newHp = prev.hp;
+      let newMaxHp = prev.maxHp;
+      let newCustomChoices = prev.customChoicesRemaining;
+      let newPendingLevelUps = prev.pendingLevelUps;
+      let newInventory = [...prev.inventory];
+      let newRerollTokens = prev.rerollTokens;
+      let newEquipped = { ...prev.equipped };
+
+      // Apply Reward
+      switch (quest.reward) {
+        case 'heal_hp':
+          newHp = Math.min(newMaxHp, newHp + (quest.rewardValue || 20));
+          addLog('response', `Reward: Healed ${quest.rewardValue || 20} HP!`);
+          break;
+        case 'restore_custom_choice':
+          newCustomChoices += (quest.rewardValue || 1);
+          addLog('response', `Reward: Restored ${quest.rewardValue || 1} Custom Choice(s)!`);
+          break;
+        case 'level_up':
+          newPendingLevelUps += 1;
+          addLog('response', `Reward: Level Up!`);
+          break;
+        case 'item':
+          if (quest.rewardItem && newInventory.length < 8) {
+            newInventory.push(quest.rewardItem);
+            addLog('response', `Reward: Received ${quest.rewardItem.name}!`);
+          } else {
+             addLog('error', 'Inventory full! Item lost.');
+          }
+          break;
+        case 'heroic_refill':
+          newHp = newMaxHp;
+          newCustomChoices = 3; 
+          addLog('response', 'Reward: Heroic Refill! HP and Choices restored.');
+          break;
+        case 'max_hp_boost':
+          newMaxHp += (quest.rewardValue || 10);
+          newHp += (quest.rewardValue || 10); 
+          addLog('response', `Reward: Max HP Increased by ${quest.rewardValue || 10}!`);
+          break;
+        case 'reroll_token':
+          newRerollTokens += (quest.rewardValue || 1);
+          addLog('response', `Reward: Received ${quest.rewardValue || 1} Reroll Token(s)!`);
+          break;
+        case 'upgrade_equipped':
+             if (newEquipped.weapon) {
+                 const weapon = { ...newEquipped.weapon };
+                 const stats = weapon.bonuses || {};
+                 const bestStat = (Object.keys(stats) as StatType[]).reduce((a, b) => (stats[a] || 0) > (stats[b] || 0) ? a : b, 'STR');
+                 weapon.bonuses = { ...stats, [bestStat]: (stats[bestStat] || 0) + 1 };
+                 newEquipped.weapon = weapon;
+                 addLog('response', `Reward: Upgraded ${weapon.name}!`);
+             } else {
+                 addLog('response', 'Reward: No weapon equipped to upgrade.');
+             }
+             break;
+        case 'legendary_item':
+             const legendaryItem = createItemFromString("Legendary Artifact");
+             legendaryItem.bonuses = { STR: 2, DEX: 2, CON: 2, INT: 2, CHA: 2, PER: 2, LUK: 2 }; 
+             if (newInventory.length < 8) {
+                 newInventory.push(legendaryItem);
+                 addLog('response', `Reward: Received Legendary Artifact!`);
+             }
+             break;
+      }
+
+      // Remove the quest
+      const remainingQuests = prev.activeSideQuests.filter(q => q.id !== questId);
+
+      return {
+        ...prev,
+        hp: newHp,
+        maxHp: newMaxHp,
+        customChoicesRemaining: newCustomChoices,
+        pendingLevelUps: newPendingLevelUps,
+        inventory: newInventory,
+        rerollTokens: newRerollTokens,
+        equipped: newEquipped,
+        activeSideQuests: remainingQuests
+      };
+    });
+  };
+
   // --- Quest Checking Hook ---
-  // We check quests whenever the history updates (end of a turn)
   useEffect(() => {
       if (gameState.history.length === 0) return;
-      
-      const lastTurn = gameState.history[gameState.history.length - 1];
-      // Only check on user turns or AI turns? 
-      // Usually we want to check after the full turn cycle. 
-      // Let's check after every turn for now, but be careful about double counting.
-      // Actually, checkQuestProgress logic handles specific triggers.
-      
-      // We only want to check if the game is playing
       if (gameState.phase !== 'playing') return;
 
-      const { updatedQuests, rewards } = checkQuestProgress(gameState, lastTurn);
+      const lastTurn = gameState.history[gameState.history.length - 1];
       
-      // If no changes, don't update state to avoid loops
-      const hasChanges = updatedQuests.some((q, i) => 
-          q.progress !== gameState.activeSideQuests[i]?.progress || 
-          q.isCompleted !== gameState.activeSideQuests[i]?.isCompleted
-      );
+      // 1. Check Progress of Active Quests
+      const { updatedQuests } = checkQuestProgress(gameState, lastTurn);
+      
+      // 2. Refresh Available Quests (User Request: "refresh each turn if not accepted")
+      const keptQuests = updatedQuests.filter(q => q.status !== 'available');
+      const refilledQuests = generateSideQuests(keptQuests);
 
-      if (hasChanges || rewards.length > 0) {
-          // Log rewards
-          rewards.forEach(r => {
-             if (r.type === 'item' && r.item) {
-                 addLog('response', `Quest Reward: Received ${r.item.name}!`);
-             }
-             if (r.type === 'level_up') {
-                 addLog('response', `Quest Reward: Level Up!`);
-             }
-          });
+      setGameState(prev => ({
+          ...prev,
+          activeSideQuests: refilledQuests
+      }));
 
-          setGameState(prev => {
-              let newHp = prev.hp;
-              let newCustomChoices = prev.customChoicesRemaining;
-              let newPendingLevelUps = prev.pendingLevelUps;
-              let newInventory = [...prev.inventory];
-
-              rewards.forEach(r => {
-                  if (r.type === 'heal_hp') newHp = Math.min(prev.maxHp, newHp + (r.value || 0));
-                  if (r.type === 'restore_custom_choice') newCustomChoices += (r.value || 0);
-                  if (r.type === 'level_up') newPendingLevelUps += 1;
-                  if (r.type === 'item' && r.item) {
-                      if (newInventory.length < 8) {
-                          newInventory.push(r.item);
-                      }
-                  }
-              });
-
-              // Remove completed quests and generate new ones
-              const activeOnly = updatedQuests.filter(q => !q.isCompleted);
-              const refilledQuests = generateSideQuests(activeOnly);
-
-              return {
-                  ...prev,
-                  activeSideQuests: refilledQuests,
-                  hp: newHp,
-                  customChoicesRemaining: newCustomChoices,
-                  pendingLevelUps: newPendingLevelUps,
-                  inventory: newInventory
-              };
-          });
-          
-          // Optional: Add log or notification for rewards
-          if (rewards.length > 0) {
-              // Could add a special "System" turn to history or just a toast
-          }
-      }
-  }, [gameState.history]); // Depend on history to trigger after turns
+  }, [gameState.history, gameState.phase]);
 
   const handleRegenerateImage = () => {
       if (!gameState.finalSummary) return;
@@ -1324,6 +1374,8 @@ const App: React.FC = () => {
             mainStoryArc={gameState.mainStoryArc}
             onHoverItem={setHoveredInventoryItem}
             sideQuests={gameState.activeSideQuests}
+            onAcceptQuest={handleAcceptQuest}
+            onCollectReward={handleCollectReward}
           />
         </>
       )}

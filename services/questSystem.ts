@@ -49,6 +49,45 @@ const BASE_TEMPLATES: QuestTemplate[] = [
         type: 'any_success_roll',
         targetRange: [2, 4],
         reward: 'level_up'
+    },
+    {
+        title: "Natural Talent",
+        description: "Roll a Natural 20 on any check.",
+        type: 'natural_20',
+        targetRange: [1, 1],
+        reward: 'heroic_refill'
+    },
+    {
+        title: "By a Thread",
+        description: "Succeed on a check by exactly matching the DC or by 1 point.",
+        type: 'close_call',
+        targetRange: [1, 1],
+        reward: 'reroll_token'
+    },
+    {
+        title: "Fully Kitted",
+        description: "Have a Weapon, Armor, and Accessory equipped simultaneously.",
+        type: 'fully_equipped',
+        targetRange: [1, 1],
+        reward: 'max_hp_boost',
+        rewardValue: 10
+    },
+    {
+        title: "Legendary Feat",
+        description: "Succeed on {target} difficult checks (DC 15+).",
+        type: 'any_success_roll', // We can reuse this type but filter in check logic if we wanted, but for now let's keep it simple or add a new type. 
+        // Actually let's stick to simple types for now.
+        // Let's use 'any_success_roll' but with higher target for a legendary item
+        targetRange: [4, 5],
+        reward: 'legendary_item'
+    },
+    {
+        title: "Weapon Master",
+        description: "Succeed on {target} checks using your main stat.",
+        type: 'stat_success_count', // Will need to infer main stat dynamically? Or just random stat.
+        // Let's just use random stat templates for this.
+        targetRange: [3, 4],
+        reward: 'upgrade_equipped'
     }
 ];
 
@@ -117,7 +156,7 @@ export const generateSideQuests = (currentQuests: SideQuest[]): SideQuest[] => {
             rewardValue: template.rewardValue,
             statTarget: template.statTarget,
             rewardItem: rewardItem,
-            isCompleted: false
+            status: 'available'
         };
         
         newQuests.push(quest);
@@ -130,12 +169,10 @@ export const generateSideQuests = (currentQuests: SideQuest[]): SideQuest[] => {
 export const checkQuestProgress = (
     gameState: GameState, 
     lastTurn: StoryTurn
-): { updatedQuests: SideQuest[], rewards: { type: QuestRewardType, value?: number, item?: InventoryItem }[] } => {
-    
-    const rewards: { type: QuestRewardType, value?: number, item?: InventoryItem }[] = [];
+): { updatedQuests: SideQuest[] } => {
     
     const updatedQuests = gameState.activeSideQuests.map(quest => {
-        if (quest.isCompleted) return quest; 
+        if (quest.status !== 'active') return quest; 
 
         let newProgress = quest.progress;
         let completed = false;
@@ -163,13 +200,38 @@ export const checkQuestProgress = (
                 }
                 break;
 
+            case 'natural_20':
+                if (lastTurn.rollResult && lastTurn.rollResult.base === 20) {
+                    newProgress = quest.target;
+                }
+                break;
+
+            case 'close_call':
+                if (lastTurn.rollResult && lastTurn.rollResult.isSuccess) {
+                    const diff = lastTurn.rollResult.total - lastTurn.rollResult.difficulty;
+                    if (diff === 0 || diff === 1) {
+                        newProgress += 1;
+                    }
+                }
+                break;
+
+            case 'fully_equipped':
+                if (gameState.equipped.weapon && gameState.equipped.armor && gameState.equipped.accessory) {
+                    newProgress = quest.target;
+                } else {
+                    newProgress = 0;
+                }
+                break;
+            
             case 'turn_count':
                 newProgress += 1;
                 break;
 
             case 'hp_threshold':
-                if (gameState.hp < (gameState.maxHp / 2)) {
+                if (gameState.hp < (gameState.maxHp * 0.5)) {
                     newProgress += 1;
+                } else {
+                    newProgress = 0;
                 }
                 break;
 
@@ -180,20 +242,14 @@ export const checkQuestProgress = (
 
         if (newProgress >= quest.target) {
             completed = true;
-            newProgress = quest.target;
-            rewards.push({ 
-                type: quest.reward, 
-                value: quest.rewardValue,
-                item: quest.rewardItem
-            });
         }
 
-        return {
-            ...quest,
-            progress: newProgress,
-            isCompleted: completed
-        };
+        if (completed) {
+            return { ...quest, progress: newProgress, status: 'completed' as const };
+        }
+
+        return { ...quest, progress: newProgress };
     });
 
-    return { updatedQuests, rewards };
+    return { updatedQuests };
 };
