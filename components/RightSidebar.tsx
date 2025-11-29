@@ -22,9 +22,11 @@ import {
   ChevronRight,
   X,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ArrowUpCircle,
+  Sparkles
 } from 'lucide-react';
-import { InventoryItem, EquippedGear, ItemType, NPC, MainStoryArc } from '../types';
+import { InventoryItem, EquippedGear, ItemType, NPC, MainStoryArc, SideQuest } from '../types';
 
 interface RightSidebarProps {
   currentQuest: string;
@@ -35,16 +37,19 @@ interface RightSidebarProps {
   onEquip: (item: InventoryItem) => void;
   onUnequip: (item: InventoryItem) => void;
   onDiscard: (item: InventoryItem) => void;
+  onUse?: (item: InventoryItem) => void;
   setDraggedItemType: (type: string | null) => void;
   draggedItemType: string | null;
   mainStoryArc?: MainStoryArc;
   onHoverItem?: (item: InventoryItem | null) => void;
+  sideQuests?: SideQuest[];
 }
 
 const getIconForItem = (name: string, type: ItemType) => {
   if (type === 'weapon') return <Sword size={14} />;
   if (type === 'armor') return <Shield size={14} />;
   if (type === 'accessory') return <Gem size={14} />;
+  if (type === 'consumable') return <FlaskConical size={14} />;
   
   const lower = name.toLowerCase();
   if (lower.includes('potion') || lower.includes('elixir')) return <FlaskConical size={14} />;
@@ -76,11 +81,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   setDraggedItemType,
   draggedItemType,
   mainStoryArc,
-  onHoverItem
+  onHoverItem,
+  sideQuests = []
 }) => {
   
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isInventoryOpen, setIsInventoryOpen] = useState(true);
+  const [isQuestsOpen, setIsQuestsOpen] = useState(true);
 
   const handleDragStart = (e: React.DragEvent, item: InventoryItem) => {
     e.dataTransfer.setData('itemId', item.id);
@@ -213,6 +220,58 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                     <Backpack size={24} />
                 </div>
 
+                {/* Side Quests Section */}
+                <div className="bg-zinc-900/50 rounded-lg border border-zinc-800 overflow-hidden shrink-0 mb-4">
+                    <button 
+                        onClick={() => setIsQuestsOpen(!isQuestsOpen)}
+                        className="w-full p-3 flex items-center justify-between bg-zinc-900 hover:bg-zinc-800 transition-colors group"
+                    >
+                        <div className="flex items-center gap-2 text-zinc-400 font-bold cinzel uppercase tracking-widest text-xs group-hover:text-zinc-300">
+                            <ScrollText size={14} />
+                            Bounties ({sideQuests.length})
+                        </div>
+                        {isQuestsOpen ? <ChevronUp size={14} className="text-zinc-500" /> : <ChevronDown size={14} className="text-zinc-500" />}
+                    </button>
+                    
+                    {isQuestsOpen && (
+                        <div className="p-3 bg-zinc-950/50 space-y-2">
+                            {sideQuests.length > 0 ? sideQuests.map(quest => (
+                                <div key={quest.id} className="bg-zinc-900 border border-zinc-800 rounded p-2 relative overflow-hidden">
+                                    <div className="flex justify-between items-start mb-1 relative z-10">
+                                        <span className="text-[10px] font-bold text-zinc-300">{quest.title}</span>
+                                        <div className="flex items-center gap-1 text-[9px] font-mono text-amber-500 bg-amber-950/30 px-1.5 rounded border border-amber-900/30">
+                                            {quest.reward === 'level_up' && <ArrowUpCircle size={8} />}
+                                            {quest.reward === 'heal_hp' && <FlaskConical size={8} />}
+                                            {quest.reward === 'restore_custom_choice' && <Sparkles size={8} />}
+                                            <span>
+                                                {quest.reward === 'level_up' ? 'LVL UP' : 
+                                                 quest.reward === 'heal_hp' ? `+${quest.rewardValue} HP` : 
+                                                 '+1 ACT'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[9px] text-zinc-500 mb-2 relative z-10">{quest.description}</p>
+                                    
+                                    {/* Progress Bar */}
+                                    <div className="h-1.5 w-full bg-zinc-950 rounded-full overflow-hidden relative z-10 border border-zinc-800">
+                                        <div 
+                                            className="h-full bg-amber-600 transition-all duration-500"
+                                            style={{ width: `${(quest.progress / quest.target) * 100}%` }}
+                                        />
+                                    </div>
+                                    <div className="text-[8px] text-zinc-600 text-right mt-0.5 font-mono relative z-10">
+                                        {quest.progress} / {quest.target}
+                                    </div>
+                                </div>
+                            )) : (
+                                <div className="text-center py-4 text-zinc-600 text-[10px] italic">
+                                    No active bounties.
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
                 {/* Inventory Section */}
                 <div className="bg-zinc-900/50 rounded-lg border border-zinc-800 overflow-hidden shrink-0">
                     <button 
@@ -286,7 +345,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                                         </div>
                                                     </div>
 
-                                                    {/* Footer: Equip Button */}
+                                                    {/* Footer: Actions */}
+                                                    {item.type === 'consumable' && onUse && (
+                                                        <button 
+                                                            onClick={() => onUse(item)}
+                                                            className="w-full py-1 bg-zinc-800 hover:bg-emerald-900/30 text-emerald-500 text-[9px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 border-t border-zinc-800"
+                                                        >
+                                                            <FlaskConical size={8} /> Use
+                                                        </button>
+                                                    )}
+
                                                     {['weapon', 'armor', 'accessory'].includes(item.type) && (
                                                         <button 
                                                             onClick={() => onEquip(item)}

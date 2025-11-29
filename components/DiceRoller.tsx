@@ -24,7 +24,7 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLa
     let timeoutId: number;
     let frameId: number;
     let startTime = Date.now();
-    let duration = 2500; // Base spin duration
+    let duration = 1500; // Base spin duration
     let speed = 50; // Initial speed (ms per number switch)
     
     // Physics decay function

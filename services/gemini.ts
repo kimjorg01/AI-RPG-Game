@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect, NPC, MainStoryArc } from "../types";
+import { AIStoryResponse, ImageSize, StoryModel, CharacterStats, RollResult, InventoryItem, EquippedGear, StatusEffect, NPC, MainStoryArc, GameLength } from "../types";
 
 const getAIClient = () => {
   const apiKey = process.env.API_KEY;
@@ -55,18 +55,27 @@ export const generateMainStory = async (
     genre: string,
     stats: CharacterStats,
     modelName: StoryModel,
-    onLog?: (type: 'request' | 'response' | 'error', content: any) => void
+    gameLength: GameLength,
+    onLog?: (type: 'request' | 'response' | 'error' | 'info', content: any) => void
 ): Promise<MainStoryArc> => {
     const ai = getAIClient();
+    
+    let lengthInstruction = "";
+    if (gameLength === 'short') lengthInstruction = "Design a SHORT, fast-paced adventure. The plot should move quickly.";
+    if (gameLength === 'long') lengthInstruction = "Design a LONG, epic saga. The plot should be intricate and slow-burning.";
+
     const prompt = `
     Create a unique, high-stakes RPG campaign outline based on the following:
     Genre: ${genre}
     Hero Stats: High ${Object.entries(stats).reduce((a, b) => a[1] > b[1] ? a : b)[0]} (Focus on this playstyle).
+    ${lengthInstruction}
 
     Return a JSON object with:
     1. "campaignTitle": A catchy name for the adventure.
     2. "backgroundLore": A short paragraph setting the scene (the world state, the threat).
-    3. "mainQuests": An array of exactly 3 objects, each with "id" (1, 2, 3), "title", "description", and "status" (set first to 'active', others 'pending'). These should lead progressively to the finale.
+    3. "mainQuests": An array of exactly 3 objects, each with "id" (1, 2, 3), "title", "description", and "status" (set first to 'active', others 'pending'). 
+       IMPORTANT: These descriptions must be BROAD, HIGH-LEVEL GOALS (e.g., "Cross the Desert", "Infiltrate the Citadel", "Find the Oracle"). 
+       Do NOT provide specific solutions or step-by-step instructions. The player must figure out *how* to achieve them.
     4. "finalObjective": The ultimate win condition.
     `;
 
@@ -122,13 +131,13 @@ export const generateStoryStep = async (
   currentQuest: string,
   currentHp: number,
   stats: CharacterStats,
-  activeEffects: StatusEffect[],
   knownNPCs: NPC[],
   genre: string,
   rollResult: RollResult | null,
   customAction: { text: string, item: string, roll: number } | null,
   modelName: StoryModel = StoryModel.Smart,
-  onLog?: (type: 'request' | 'response' | 'error', content: any) => void,
+  gameLength: GameLength = 'medium',
+  onLog?: (type: 'request' | 'response' | 'error' | 'info', content: any) => void,
   mainStoryArc?: MainStoryArc
 ): Promise<AIStoryResponse> => {
   const ai = getAIClient();
@@ -166,6 +175,37 @@ export const generateStoryStep = async (
   const equippedString = formatEquipped(equipped);
   const npcString = formatNPCs(knownNPCs);
 
+  let campaignContext = '';
+  if (mainStoryArc) {
+      const activeQuest = mainStoryArc.mainQuests.find(q => q.status === 'active');
+      
+      let objective = activeQuest ? activeQuest.description : mainStoryArc.finalObjective;
+      let urgency = "";
+
+      // Thresholds based on Game Length
+      let threshold = 20; // Medium
+      if (gameLength === 'short') threshold = 10;
+      if (gameLength === 'long') threshold = 35;
+
+      if (activeQuest && activeQuest.turnCount && activeQuest.turnCount > threshold) {
+            urgency = "CRITICAL INSTRUCTION: The player has been in this act for too long. You MUST steer the narrative towards the immediate conclusion of this act. Present a climax or a resolution NOW.";
+      }
+
+      campaignContext = `
+      --- CAMPAIGN CONTEXT ---
+      Title: ${mainStoryArc.campaignTitle}
+      Lore: ${mainStoryArc.backgroundLore}
+      Current Act Objective: ${objective}
+      Final Goal: ${mainStoryArc.finalObjective}
+      
+      INSTRUCTIONS:
+      1. If the user successfully completes the 'Current Act Objective', set "act_completed": true in the JSON.
+      2. Do NOT set "game_status": "won" unless the 'Final Goal' is fully achieved.
+      ${urgency}
+      ------------------------
+      `;
+  }
+
   const prompt = `
     Context:
     - Genre: ${genre}
@@ -188,15 +228,7 @@ export const generateStoryStep = async (
     
     ${actionDescription}
     
-    ${mainStoryArc ? `
-    --- CAMPAIGN CONTEXT ---
-    Title: ${mainStoryArc.campaignTitle}
-    Lore: ${mainStoryArc.backgroundLore}
-    Current Main Objective: ${mainStoryArc.mainQuests.find(q => q.status === 'active')?.description || mainStoryArc.finalObjective}
-    Final Goal: ${mainStoryArc.finalObjective}
-    Ensure the narrative steers towards these objectives.
-    ------------------------
-    ` : ''}
+    ${campaignContext}
 
     Generate the next segment.
   `;
@@ -252,46 +284,7 @@ export const generateStoryStep = async (
             quest_update: { type: Type.STRING },
             hp_change: { type: Type.INTEGER },
             game_status: { type: Type.STRING, enum: ['ongoing', 'won', 'lost'] },
-            stats_update: {
-                type: Type.OBJECT,
-                description: "Optional: Increase a stat. Normal (+1), Special Event (+3 to +5).",
-                properties: {
-                    STR: { type: Type.INTEGER },
-                    DEX: { type: Type.INTEGER },
-                    CON: { type: Type.INTEGER },
-                    INT: { type: Type.INTEGER },
-                    CHA: { type: Type.INTEGER },
-                    PER: { type: Type.INTEGER },
-                    LUK: { type: Type.INTEGER },
-                }
-            },
-            new_effects: {
-                type: Type.ARRAY,
-                description: "Add temporary buffs or debuffs based on narrative context.",
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING, description: "e.g. Concussed, Empowered" },
-                        description: { type: Type.STRING, description: "Short description of effect" },
-                        type: { type: Type.STRING, enum: ['buff', 'debuff'] },
-                        duration: { type: Type.INTEGER, description: "Number of turns this lasts (1-5)" },
-                        blocksHeroicActions: { type: Type.BOOLEAN, nullable: true },
-                        statModifiers: {
-                            type: Type.OBJECT,
-                            properties: {
-                                STR: { type: Type.INTEGER },
-                                DEX: { type: Type.INTEGER },
-                                CON: { type: Type.INTEGER },
-                                INT: { type: Type.INTEGER },
-                                CHA: { type: Type.INTEGER },
-                                PER: { type: Type.INTEGER },
-                                LUK: { type: Type.INTEGER },
-                            }
-                        }
-                    },
-                    required: ["name", "type", "duration"]
-                }
-            },
+            act_completed: { type: Type.BOOLEAN, description: "Set to true ONLY when the Current Act Objective is fully resolved." },
             npcs_update: {
                 type: Type.OBJECT,
                 properties: {

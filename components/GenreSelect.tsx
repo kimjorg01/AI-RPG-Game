@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { Sword, Zap, Skull, Biohazard, Wand2, Crown, PenTool, ArrowRight, X } from 'lucide-react';
+import { Sword, Zap, Skull, Biohazard, Wand2, Crown, PenTool, ArrowRight, X, Clock } from 'lucide-react';
+import { GameLength } from '../types';
 
 interface GenreSelectProps {
-  onSelect: (genre: string) => void;
+  onSelect: (genre: string, length: GameLength) => void;
 }
 
 const GENRES = [
@@ -19,20 +20,44 @@ const GENRES = [
 export const GenreSelect: React.FC<GenreSelectProps> = ({ onSelect }) => {
   const [isCustom, setIsCustom] = useState(false);
   const [customInput, setCustomInput] = useState("");
+  const [selectedLength, setSelectedLength] = useState<GameLength>('medium');
 
   const handleCustomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (customInput.trim()) {
-      onSelect(customInput.trim());
+      onSelect(customInput.trim(), selectedLength);
     }
   };
+
+  const LengthSelector = () => (
+      <div className="flex justify-center gap-4 mb-8">
+          {(['short', 'medium', 'long'] as GameLength[]).map(len => (
+              <button
+                  key={len}
+                  onClick={() => setSelectedLength(len)}
+                  className={`
+                      px-4 py-2 rounded-full border transition-all flex items-center gap-2
+                      ${selectedLength === len 
+                          ? 'bg-amber-900/30 border-amber-500 text-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.2)]' 
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+                      }
+                  `}
+              >
+                  <Clock size={14} />
+                  <span className="uppercase text-xs font-bold tracking-wider">{len}</span>
+              </button>
+          ))}
+      </div>
+  );
 
   if (isCustom) {
     return (
       <div className="max-w-xl mx-auto p-6 text-center animate-fadeIn">
          <h1 className="cinzel text-4xl font-bold text-zinc-100 mb-2">Custom World</h1>
-         <p className="text-zinc-400 mb-8">Describe the setting, tone, or specific scenario you want to play.</p>
+         <p className="text-zinc-400 mb-4">Describe the setting, tone, or specific scenario you want to play.</p>
          
+         <LengthSelector />
+
          <form onSubmit={handleCustomSubmit} className="relative">
             <textarea 
               value={customInput}
@@ -67,13 +92,15 @@ export const GenreSelect: React.FC<GenreSelectProps> = ({ onSelect }) => {
   return (
     <div className="max-w-5xl mx-auto p-6 text-center animate-fadeIn">
       <h1 className="cinzel text-4xl font-bold text-zinc-100 mb-2">Choose Your Tale</h1>
-      <p className="text-zinc-400 mb-8">Select the world you wish to inhabit.</p>
+      <p className="text-zinc-400 mb-6">Select the world you wish to inhabit.</p>
       
+      <LengthSelector />
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {GENRES.map((g) => (
           <button
             key={g.id}
-            onClick={() => g.id === 'Custom' ? setIsCustom(true) : onSelect(g.id)}
+            onClick={() => g.id === 'Custom' ? setIsCustom(true) : onSelect(g.id, selectedLength)}
             className={`
               p-6 bg-zinc-900 border border-zinc-800 rounded-xl text-left transition-all duration-300 group
               hover:bg-zinc-800 ${g.bg} hover:scale-[1.02] shadow-lg relative overflow-hidden

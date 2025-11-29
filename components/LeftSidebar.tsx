@@ -310,7 +310,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 {/* Equipment & Stats Row */}
                 <div className="flex gap-2">
                     {/* Equipment */}
-                    <div className="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800 flex-1">
+                    <div className="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800 flex-1 min-w-0">
                         <h2 className="text-amber-400 font-bold mb-3 flex items-center gap-2 cinzel text-xs uppercase tracking-widest">
                             <Shield size={14} /> Gear
                         </h2>
@@ -350,10 +350,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                                                     className="flex-1 cursor-grab active:cursor-grabbing min-w-0"
                                                 >
                                                     <div className={`text-xs font-bold ${color} truncate pr-1`}>{item.name}</div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[9px] text-zinc-500">{label}</span>
+                                                    <div className="flex items-center gap-2 overflow-hidden">
+                                                        <span className="text-[9px] text-zinc-500 shrink-0">{label}</span>
                                                         {item.bonuses && (
-                                                            <span className="text-[9px] text-emerald-500 font-mono">
+                                                            <span className="text-[9px] text-emerald-500 font-mono truncate">
                                                                 {Object.entries(item.bonuses).map(([k,v]) => `+${v} ${k}`).join(', ')}
                                                             </span>
                                                         )}
@@ -385,7 +385,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     </div>
 
                     {/* Minimized Stats Column */}
-                    <div className="bg-zinc-900/50 p-2 rounded-lg border border-zinc-800 w-[70px] flex flex-col gap-1">
+                    <div className="bg-zinc-900/50 p-2 rounded-lg border border-zinc-800 w-[70px] shrink-0 flex flex-col gap-1">
                          {(Object.keys(stats) as Array<keyof CharacterStats>).map((key) => {
                             const val = stats[key];
                             const previewVal = previewStats ? previewStats[key] : val;

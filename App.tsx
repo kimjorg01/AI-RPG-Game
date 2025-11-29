@@ -10,10 +10,12 @@ import { DiceRoller } from './components/DiceRoller';
 import { MainMenu } from './components/MainMenu';
 import { GameOverScreen } from './components/GameOverScreen';
 import { CustomChoiceModal } from './components/CustomChoiceModal';
-import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale, MainStoryArc } from './types';
+import { LevelUpModal } from './components/LevelUpModal';
+import { GameState, StoryTurn, AppSettings, ImageSize, StoryModel, GamePhase, CharacterStats, ChoiceData, RollResult, SaveData, InventoryItem, EquippedGear, StatExperience, LevelUpEvent, StatusEffect, StatType, NPC, UIScale, MainStoryArc, GameLength } from './types';
 import { generateStoryStep, generateGameSummary, generateStoryboard, generateMainStory } from './services/gemini';
 import { createItemFromString } from './services/itemFactory';
 import { inferStatFromText } from './services/statInference';
+import { generateSideQuests, checkQuestProgress } from './services/questSystem';
 import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal, Loader2 } from 'lucide-react';
 import { DebugConsole, LogEntry } from './components/DebugConsole';
 
@@ -69,6 +71,17 @@ const getStatConfig = (stat: string) => {
   }
 };
 
+const validateAIResponse = (response: any): boolean => {
+  if (!response) return false;
+  if (typeof response !== 'object') return false;
+  // Narrative is mandatory
+  if (!response.narrative || typeof response.narrative !== 'string') return false;
+  // Choices should be an array (can be empty if game over, but must exist)
+  if (!Array.isArray(response.choices)) return false;
+  
+  return true;
+};
+
 const App: React.FC = () => {
   // --- State Management ---
   const [gameState, setGameState] = useState<GameState>({
@@ -85,11 +98,14 @@ const App: React.FC = () => {
     gameStatus: 'ongoing',
     phase: 'menu',
     genre: 'Fantasy',
+    gameLength: 'medium',
     stats: DEFAULT_STATS,
     statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0, LUK: 0 },
     activeEffects: [],
     startingStats: DEFAULT_STATS,
-    customChoicesRemaining: 3
+    customChoicesRemaining: 3,
+    activeSideQuests: [],
+    pendingLevelUps: 0
   });
 
   const [settings, setSettings] = useState<AppSettings>({
@@ -113,7 +129,7 @@ const App: React.FC = () => {
   const [showDebug, setShowDebug] = useState(false);
   const [debugLogs, setDebugLogs] = useState<LogEntry[]>([]);
 
-  const addLog = (type: 'request' | 'response' | 'error', content: any) => {
+  const addLog = (type: 'request' | 'response' | 'error' | 'info', content: any) => {
     setDebugLogs(prev => [...prev, {
       id: Math.random().toString(36).substring(7),
       timestamp: Date.now(),
@@ -287,6 +303,67 @@ const App: React.FC = () => {
       }));
   };
 
+  const handleUseItem = (item: InventoryItem) => {
+      if (item.type !== 'consumable' || !item.consumableEffect) return;
+
+      const effect = item.consumableEffect;
+      let used = false;
+
+      setGameState(prev => {
+          let newHp = prev.hp;
+          let newActiveEffects = [...prev.activeEffects];
+
+          if (effect.type === 'heal') {
+              if (prev.hp >= prev.maxHp) {
+                  addLog('error', 'HP is already full!');
+                  return prev;
+              }
+              newHp = Math.min(prev.maxHp, prev.hp + effect.value);
+              addLog('response', `Used ${item.name}: Healed ${effect.value} HP.`);
+              used = true;
+          } else if (effect.type === 'stat_boost' && effect.stat) {
+              // Add status effect
+              const newEffect: StatusEffect = {
+                  id: Math.random().toString(36).substring(7),
+                  name: item.name,
+                  description: `+${effect.value} ${effect.stat}${effect.penaltyStat ? `, -${effect.penaltyValue} ${effect.penaltyStat}` : ''}`,
+                  type: 'buff',
+                  duration: effect.duration || 3,
+                  statModifiers: {
+                      [effect.stat]: effect.value,
+                      ...(effect.penaltyStat ? { [effect.penaltyStat]: -(effect.penaltyValue || 0) } : {})
+                  }
+              };
+              newActiveEffects.push(newEffect);
+              addLog('response', `Used ${item.name}: ${newEffect.description} for ${newEffect.duration} turns.`);
+              used = true;
+          }
+
+          if (!used) return prev;
+
+          return {
+              ...prev,
+              hp: newHp,
+              activeEffects: newActiveEffects,
+              inventory: prev.inventory.filter(i => i.id !== item.id)
+          };
+      });
+  };
+
+  const handleLevelUp = (stat: StatType) => {
+      setGameState(prev => {
+          if (prev.pendingLevelUps <= 0) return prev;
+          return {
+              ...prev,
+              stats: {
+                  ...prev.stats,
+                  [stat]: prev.stats[stat] + 1
+              },
+              pendingLevelUps: prev.pendingLevelUps - 1
+          };
+      });
+  };
+
   // --- Core Game Logic ---
   const handleNewGame = () => {
     setGameState(prev => ({ 
@@ -301,12 +378,14 @@ const App: React.FC = () => {
         activeEffects: [],
         customChoicesRemaining: 3,
         finalSummary: undefined,
-        finalStoryboard: undefined
+        finalStoryboard: undefined,
+        activeSideQuests: [],
+        pendingLevelUps: 0
     }));
   };
 
-  const handleGenreSelect = (genre: string) => {
-    setGameState(prev => ({ ...prev, genre, phase: 'setup_stats' }));
+  const handleGenreSelect = (genre: string, length: GameLength) => {
+    setGameState(prev => ({ ...prev, genre, gameLength: length, phase: 'setup_stats' }));
   };
 
   const handleStatsComplete = (stats: CharacterStats) => {
@@ -318,15 +397,24 @@ const App: React.FC = () => {
     }));
     
     // Trigger world generation
-    generateMainStory(gameState.genre, stats, settings.storyModel, addLog)
+    generateMainStory(gameState.genre, stats, settings.storyModel, gameState.gameLength, addLog)
         .then(arc => {
-            setGameState(prev => ({ ...prev, mainStoryArc: arc, phase: 'playing' }));
+            setGameState(prev => ({ 
+                ...prev, 
+                mainStoryArc: arc, 
+                phase: 'playing',
+                activeSideQuests: generateSideQuests([]) // Initialize quests
+            }));
             processTurn("Begin the adventure.", null, null, undefined, arc);
         })
         .catch(err => {
             addLog('error', err);
             // Fallback if generation fails
-            setGameState(prev => ({ ...prev, phase: 'playing' }));
+            setGameState(prev => ({ 
+                ...prev, 
+                phase: 'playing',
+                activeSideQuests: generateSideQuests([]) // Initialize quests
+            }));
             processTurn("Begin the adventure.", null, null);
         });
   };
@@ -432,16 +520,15 @@ const App: React.FC = () => {
       setShowRetry(false);
       setGameState(prev => ({ ...prev, isLoading: true }));
       
-      const { userText, rollResult, customAction, overrideArc, decrementedEffects } = lastTurnParams;
-      generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc, decrementedEffects);
+      const { userText, rollResult, customAction, overrideArc } = lastTurnParams;
+      generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc);
   };
 
   const generateAndProcessAIResponse = async (
       userText: string,
       rollResult: RollResult | null,
       customAction: { text: string, item: string, roll: number } | null,
-      overrideArc: MainStoryArc | undefined,
-      decrementedEffects: StatusEffect[]
+      overrideArc: MainStoryArc | undefined
   ) => {
       const currentRequestId = ++requestIdRef.current;
 
@@ -465,18 +552,26 @@ const App: React.FC = () => {
             gameState.currentQuest,
             gameState.hp,
             currentStats,
-            decrementedEffects,
             gameState.npcs,
             gameState.genre,
             rollResult,
             customAction,
             settings.storyModel,
+            gameState.gameLength,
             addLog,
             overrideArc || gameState.mainStoryArc
           );
 
           if (currentRequestId !== requestIdRef.current) {
               console.log("Request cancelled or superseded");
+              return;
+          }
+
+          if (!validateAIResponse(aiResponse)) {
+              addLog('error', 'Received invalid response from AI. Please try again.');
+              console.error("Invalid AI Response:", aiResponse);
+              setGameState(prev => ({ ...prev, isLoading: false }));
+              setShowRetry(true);
               return;
           }
 
@@ -559,36 +654,65 @@ const App: React.FC = () => {
                   status = 'lost';
                   newHp = 0;
               }
+
+              // --- Act / Quest Progression Logic ---
+              let currentArc = prev.mainStoryArc ? { ...prev.mainStoryArc, mainQuests: [...prev.mainStoryArc.mainQuests] } : undefined;
+              let questUpdateText = aiResponse.quest_update || prev.currentQuest;
+              
+              if (currentArc) {
+                  const activeQuestIndex = currentArc.mainQuests.findIndex(q => q.status === 'active');
+                  
+                  if (activeQuestIndex !== -1) {
+                      // Increment turn count
+                      const activeQuest = { ...currentArc.mainQuests[activeQuestIndex] };
+                      activeQuest.turnCount = (activeQuest.turnCount || 0) + 1;
+                      currentArc.mainQuests[activeQuestIndex] = activeQuest;
+
+                      if (aiResponse.act_completed) {
+                          // Complete current
+                          activeQuest.status = 'completed';
+                          currentArc.mainQuests[activeQuestIndex] = activeQuest;
+                          
+                          // Find next
+                          const nextQuestIndex = activeQuestIndex + 1;
+                          if (nextQuestIndex < currentArc.mainQuests.length) {
+                              const nextQuest = { ...currentArc.mainQuests[nextQuestIndex] };
+                              nextQuest.status = 'active';
+                              nextQuest.turnCount = 0;
+                              currentArc.mainQuests[nextQuestIndex] = nextQuest;
+                              
+                              questUpdateText = nextQuest.description;
+                              addLog('info', `Act Completed! Starting: ${nextQuest.title}`);
+                          } else {
+                              // All quests done, now in Finale
+                              questUpdateText = `Finale: ${currentArc.finalObjective}`;
+                              addLog('info', `All Acts Completed! Final Objective: ${currentArc.finalObjective}`);
+                          }
+                      }
+                  } else {
+                      // No active quest. Are we in finale?
+                      const allDone = currentArc.mainQuests.every(q => q.status === 'completed');
+                      if (allDone && aiResponse.act_completed) {
+                          status = 'won';
+                      }
+                  }
+              }
+              
+              // Prevent premature win
+              if (status === 'won' && currentArc) {
+                   const allDone = currentArc.mainQuests.every(q => q.status === 'completed');
+                   if (!allDone) {
+                       status = 'ongoing';
+                   }
+              }
+
               if (status !== 'ongoing') {
                   setTimeout(() => setGameState(p => ({...p, phase: 'game_over'})), 1000);
               }
 
               let newStats = { ...prev.stats };
-              let finalStatsUpdate: Partial<CharacterStats> | undefined = undefined;
               let finalStatExp = { ...prev.statExperience };
               
-              if (aiResponse.stats_update) {
-                  finalStatsUpdate = {};
-                  const keys = Object.keys(aiResponse.stats_update) as Array<keyof CharacterStats>;
-                  keys.forEach(key => {
-                      let val = aiResponse.stats_update![key] || 0;
-                      if (val > 5) val = 5; 
-                      if (val < -2) val = -2;
-                      if (val !== 0) {
-                          finalStatsUpdate![key] = val;
-                          newStats[key] += val;
-                      }
-                  });
-                  if (Object.keys(finalStatsUpdate).length === 0) finalStatsUpdate = undefined;
-              }
-
-              const brandNewEffects: StatusEffect[] = (aiResponse.new_effects || []).map(e => ({
-                  ...e,
-                  id: Math.random().toString(36).substring(7)
-              }));
-              
-              const finalActiveEffects = [...prev.activeEffects, ...brandNewEffects];
-
               // Process NPCs
               let currentNPCs = [...prev.npcs];
               const npcAdd = aiResponse.npcs_update?.add || [];
@@ -648,10 +772,8 @@ const App: React.FC = () => {
                   text: aiResponse.narrative,
                   choices: aiResponse.choices,
                   isUserTurn: false,
-                  statsUpdated: finalStatsUpdate, 
                   inventoryAdded: newItems,
                   inventoryRemoved: aiResponse.inventory_removed,
-                  newEffects: brandNewEffects.length > 0 ? brandNewEffects : undefined,
                   rollResult: customActionRollResult,
                   levelUpEvent: customActionLevelUp,
                   npcUpdates: npcAdd 
@@ -662,8 +784,7 @@ const App: React.FC = () => {
                   history: [...prev.history, aiTurn],
                   inventory: finalInventory,
                   equipped: equippedUpdated ? newEquipped : prev.equipped,
-                  activeEffects: finalActiveEffects,
-                  currentQuest: aiResponse.quest_update || prev.currentQuest,
+                  currentQuest: questUpdateText,
                   npcs: currentNPCs,
                   isLoading: false,
                   hp: newHp,
@@ -671,7 +792,8 @@ const App: React.FC = () => {
                   stats: newStats,
                   statExperience: finalStatExp,
                   gameStatus: status as any,
-                  phase: status === 'ongoing' ? 'playing' : 'game_over'
+                  phase: status === 'ongoing' ? 'playing' : 'game_over',
+                  mainStoryArc: currentArc || prev.mainStoryArc
               };
           });
 
@@ -726,8 +848,79 @@ const App: React.FC = () => {
     });
 
     // Call the helper
-    generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc, decrementedEffects);
+    generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc);
   };
+
+  // --- Quest Checking Hook ---
+  // We check quests whenever the history updates (end of a turn)
+  useEffect(() => {
+      if (gameState.history.length === 0) return;
+      
+      const lastTurn = gameState.history[gameState.history.length - 1];
+      // Only check on user turns or AI turns? 
+      // Usually we want to check after the full turn cycle. 
+      // Let's check after every turn for now, but be careful about double counting.
+      // Actually, checkQuestProgress logic handles specific triggers.
+      
+      // We only want to check if the game is playing
+      if (gameState.phase !== 'playing') return;
+
+      const { updatedQuests, rewards } = checkQuestProgress(gameState, lastTurn);
+      
+      // If no changes, don't update state to avoid loops
+      const hasChanges = updatedQuests.some((q, i) => 
+          q.progress !== gameState.activeSideQuests[i]?.progress || 
+          q.isCompleted !== gameState.activeSideQuests[i]?.isCompleted
+      );
+
+      if (hasChanges || rewards.length > 0) {
+          // Log rewards
+          rewards.forEach(r => {
+             if (r.type === 'item' && r.item) {
+                 addLog('response', `Quest Reward: Received ${r.item.name}!`);
+             }
+             if (r.type === 'level_up') {
+                 addLog('response', `Quest Reward: Level Up!`);
+             }
+          });
+
+          setGameState(prev => {
+              let newHp = prev.hp;
+              let newCustomChoices = prev.customChoicesRemaining;
+              let newPendingLevelUps = prev.pendingLevelUps;
+              let newInventory = [...prev.inventory];
+
+              rewards.forEach(r => {
+                  if (r.type === 'heal_hp') newHp = Math.min(prev.maxHp, newHp + (r.value || 0));
+                  if (r.type === 'restore_custom_choice') newCustomChoices += (r.value || 0);
+                  if (r.type === 'level_up') newPendingLevelUps += 1;
+                  if (r.type === 'item' && r.item) {
+                      if (newInventory.length < 8) {
+                          newInventory.push(r.item);
+                      }
+                  }
+              });
+
+              // Remove completed quests and generate new ones
+              const activeOnly = updatedQuests.filter(q => !q.isCompleted);
+              const refilledQuests = generateSideQuests(activeOnly);
+
+              return {
+                  ...prev,
+                  activeSideQuests: refilledQuests,
+                  hp: newHp,
+                  customChoicesRemaining: newCustomChoices,
+                  pendingLevelUps: newPendingLevelUps,
+                  inventory: newInventory
+              };
+          });
+          
+          // Optional: Add log or notification for rewards
+          if (rewards.length > 0) {
+              // Could add a special "System" turn to history or just a toast
+          }
+      }
+  }, [gameState.history]); // Depend on history to trigger after turns
 
   const handleRegenerateImage = () => {
       if (!gameState.finalSummary) return;
@@ -1125,10 +1318,12 @@ const App: React.FC = () => {
             onEquip={handleEquip}
             onUnequip={handleUnequip}
             onDiscard={handleDiscard}
+            onUse={handleUseItem}
             setDraggedItemType={setDraggedItemType}
             draggedItemType={draggedItemType}
             mainStoryArc={gameState.mainStoryArc}
             onHoverItem={setHoveredInventoryItem}
+            sideQuests={gameState.activeSideQuests}
           />
         </>
       )}
@@ -1168,6 +1363,12 @@ const App: React.FC = () => {
         inventory={gameState.inventory}
         equipped={gameState.equipped}
         remainingUses={gameState.customChoicesRemaining}
+      />
+
+      <LevelUpModal
+        pendingCount={gameState.pendingLevelUps}
+        currentStats={currentStats}
+        onLevelUp={handleLevelUp}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 
-import { InventoryItem, ItemType, CharacterStats } from "../types";
+import { InventoryItem, ItemType, CharacterStats, ConsumableEffect, StatType } from "../types";
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -7,11 +7,66 @@ export const createItemFromString = (name: string): InventoryItem => {
   const lowerName = name.toLowerCase();
   let type: ItemType = 'misc';
   let bonuses: Partial<CharacterStats> = {};
+  let consumableEffect: ConsumableEffect | undefined = undefined;
 
   // --- 1. DETERMINE TYPE ---
 
+  // Consumables
+  if (lowerName.match(/potion|elixir|tonic|brew|flask|vial|stim|medkit|bandage|salve|pill|tablet|injector|ration|food|drink|snack|meal|bread|water|wine|ale|beer/)) {
+      type = 'consumable';
+      
+      // Determine Effect
+      if (lowerName.match(/health|heal|life|vitality|medkit|bandage|salve|ration|food|bread/)) {
+          consumableEffect = {
+              type: 'heal',
+              value: 15 + Math.floor(Math.random() * 15) // 15-30 HP
+          };
+      } else if (lowerName.match(/stim|injector|adrenaline|rage|frenzy/)) {
+          consumableEffect = {
+              type: 'stat_boost',
+              stat: 'STR',
+              value: 2,
+              duration: 4,
+              penaltyStat: 'INT',
+              penaltyValue: 1
+          };
+      } else if (lowerName.match(/focus|mind|clarity|intelligence|mana/)) {
+          consumableEffect = {
+              type: 'stat_boost',
+              stat: 'INT',
+              value: 2,
+              duration: 4,
+              penaltyStat: 'CON',
+              penaltyValue: 1
+          };
+      } else if (lowerName.match(/speed|haste|swift|dexterity|reflex/)) {
+          consumableEffect = {
+              type: 'stat_boost',
+              stat: 'DEX',
+              value: 2,
+              duration: 4,
+              penaltyStat: 'STR',
+              penaltyValue: 1
+          };
+      } else if (lowerName.match(/iron|skin|bark|defense|constitution|fortitude/)) {
+          consumableEffect = {
+              type: 'stat_boost',
+              stat: 'CON',
+              value: 2,
+              duration: 4,
+              penaltyStat: 'DEX',
+              penaltyValue: 1
+          };
+      } else {
+          // Generic Potion -> Small Heal
+          consumableEffect = {
+              type: 'heal',
+              value: 10 + Math.floor(Math.random() * 10)
+          };
+      }
+  }
   // Weapons: Melee, Ranged, Magic, Sci-Fi
-  if (lowerName.match(/sword|axe|dagger|blade|spear|mace|hammer|bow|staff|wand|rod|scepter|pipe|bar|club|stick|rock|stone|brick|shiv|knife|glass|shard|wrench|crowbar|bat|pistol|rifle|gun|blaster|saber|claws|fist|knuckles|gauntlet|scythe|whip|flail|morningstar|halberd|pike|lance|trident|rapier|katana|scimitar|claymore|zweihander|maul|sledge|crossbow|dart|shuriken|sling|revolver|sniper|shotgun|smg|cannon|raygun|phaser|taser|prod|cutter|chainsaw|drill/)) {
+  else if (lowerName.match(/sword|axe|dagger|blade|spear|mace|hammer|bow|staff|wand|rod|scepter|pipe|bar|club|stick|rock|stone|brick|shiv|knife|glass|shard|wrench|crowbar|bat|pistol|rifle|gun|blaster|saber|claws|fist|knuckles|gauntlet|scythe|whip|flail|morningstar|halberd|pike|lance|trident|rapier|katana|scimitar|claymore|zweihander|maul|sledge|crossbow|dart|shuriken|sling|revolver|sniper|shotgun|smg|cannon|raygun|phaser|taser|prod|cutter|chainsaw|drill/)) {
     type = 'weapon';
   } 
   // Armor: Body, Head, Shield, Feet, Hands
@@ -162,6 +217,7 @@ export const createItemFromString = (name: string): InventoryItem => {
     id: generateId(),
     name,
     type,
-    bonuses: Object.keys(bonuses).length > 0 ? bonuses : undefined
+    bonuses: Object.keys(bonuses).length > 0 ? bonuses : undefined,
+    consumableEffect
   };
 };

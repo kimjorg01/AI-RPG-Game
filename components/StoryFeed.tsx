@@ -95,23 +95,6 @@ export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking, onSto
                  </p>
               </div>
 
-              {/* STAT BOOST NOTIFICATION (FROM AI / EVENTS) */}
-              {turn.statsUpdated && Object.keys(turn.statsUpdated).length > 0 && (
-                <div className="mt-3 bg-gradient-to-r from-purple-900/20 to-purple-900/40 border border-purple-600/50 px-4 py-2 rounded-lg flex items-center gap-3 animate-pulse shadow-[0_0_15px_rgba(147,51,234,0.2)]">
-                   <Sparkles size={20} className="text-purple-400" />
-                   <div className="flex flex-col">
-                       <span className="text-purple-200 font-bold cinzel text-sm uppercase tracking-wider">
-                           Heroic Milestone!
-                       </span>
-                       <div className="flex gap-2 text-xs text-purple-300">
-                           {Object.entries(turn.statsUpdated).map(([stat, val]) => (
-                               <span key={stat} className="font-mono">{stat} {(val as number) > 0 ? '+' : ''}{val as number}</span>
-                           ))}
-                       </div>
-                   </div>
-                </div>
-              )}
-
               {/* Inventory Updates Badge */}
               {( (turn.inventoryAdded?.length || 0) > 0 || (turn.inventoryRemoved?.length || 0) > 0 ) && (
                 <div className="flex flex-wrap gap-2 animate-fadeIn">

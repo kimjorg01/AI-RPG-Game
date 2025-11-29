@@ -1,6 +1,6 @@
 
 export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA' | 'PER' | 'LUK';
-export type ItemType = 'weapon' | 'armor' | 'accessory' | 'misc';
+export type ItemType = 'weapon' | 'armor' | 'accessory' | 'consumable' | 'misc';
 
 export interface CharacterStats {
   STR: number;
@@ -21,12 +21,22 @@ export interface LevelUpEvent {
   isSpecialEvent?: boolean; // New flag for instant boosts
 }
 
+export interface ConsumableEffect {
+    type: 'heal' | 'stat_boost';
+    value: number; // HP amount or Stat amount
+    stat?: StatType; // For stat_boost
+    duration?: number; // For stat_boost (0 or undefined = instant/permanent? No, usually temporary)
+    penaltyStat?: StatType; // For trade-offs (e.g. +2 STR, -1 INT)
+    penaltyValue?: number;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
   type: ItemType;
   description?: string;
   bonuses?: Partial<CharacterStats>;
+  consumableEffect?: ConsumableEffect;
 }
 
 export interface EquippedGear {
@@ -61,6 +71,7 @@ export interface MainQuest {
     title: string;
     description: string;
     status: 'active' | 'completed' | 'pending';
+    turnCount?: number;
 }
 
 export interface MainStoryArc {
@@ -85,6 +96,25 @@ export interface RollResult {
   difficulty: number;
 }
 
+export type QuestType = 'roll_streak' | 'turn_count' | 'hp_threshold' | 'stat_check_count' | 'inventory_count' | 'any_success_roll' | 'stat_success_count';
+export type QuestRewardType = 'level_up' | 'heal_hp' | 'restore_custom_choice' | 'item';
+
+export interface SideQuest {
+    id: string;
+    title: string;
+    description: string;
+    type: QuestType;
+    target: number;
+    progress: number;
+    reward: QuestRewardType;
+    rewardValue?: number;
+    statTarget?: StatType; 
+    rewardItem?: InventoryItem;
+    isCompleted: boolean;
+}
+
+export type GameLength = 'short' | 'medium' | 'long';
+
 export interface GameState {
   inventory: InventoryItem[];
   equipped: EquippedGear;
@@ -99,6 +129,7 @@ export interface GameState {
   gameStatus: GameStatus;
   phase: GamePhase;
   genre: string;
+  gameLength: GameLength;
   stats: CharacterStats;
   statExperience: StatExperience; // Tracks usage for leveling
   activeEffects: StatusEffect[];
@@ -107,6 +138,8 @@ export interface GameState {
   finalStoryboard?: string; // The 10-panel comic image
   customChoicesRemaining: number; // Limit 3 per game
   mainStoryArc?: MainStoryArc;
+  activeSideQuests: SideQuest[];
+  pendingLevelUps: number;
 }
 
 export interface StoryTurn {
@@ -119,7 +152,6 @@ export interface StoryTurn {
   isUserTurn?: boolean;
   rollResult?: RollResult;
   levelUpEvent?: LevelUpEvent; // Notification for UI
-  statsUpdated?: Partial<CharacterStats>; // From AI or Usage
   inventoryAdded?: InventoryItem[];
   inventoryRemoved?: string[];
   newEffects?: StatusEffect[];
@@ -139,7 +171,6 @@ export interface AIStoryResponse {
   visual_prompt?: string;
   hp_change?: number;
   game_status?: GameStatus;
-  stats_update?: Partial<CharacterStats>; // AI suggests a stat increase
   new_effects?: StatusEffect[];
   npcs_update?: {
       add?: NPC[];
@@ -153,6 +184,7 @@ export interface AIStoryResponse {
       total: number;
       is_success: boolean;
   };
+  act_completed?: boolean;
 }
 
 export enum ImageSize {

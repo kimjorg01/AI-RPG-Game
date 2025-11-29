@@ -5,7 +5,7 @@ import { X, Terminal, ArrowDown, ArrowUp, AlertTriangle, ChevronRight, ChevronDo
 export interface LogEntry {
   id: string;
   timestamp: number;
-  type: 'request' | 'response' | 'error';
+  type: 'request' | 'response' | 'error' | 'info';
   content: any;
 }
 
