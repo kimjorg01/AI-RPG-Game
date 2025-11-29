@@ -36,7 +36,9 @@ interface RightSidebarProps {
   onUnequip: (item: InventoryItem) => void;
   onDiscard: (item: InventoryItem) => void;
   setDraggedItemType: (type: string | null) => void;
+  draggedItemType: string | null;
   mainStoryArc?: MainStoryArc;
+  onHoverItem?: (item: InventoryItem | null) => void;
 }
 
 const getIconForItem = (name: string, type: ItemType) => {
@@ -72,7 +74,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   onUnequip,
   onDiscard,
   setDraggedItemType,
-  mainStoryArc
+  draggedItemType,
+  mainStoryArc,
+  onHoverItem
 }) => {
   
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -239,6 +243,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                                 aspect-[1.5/1] bg-zinc-900 border border-zinc-800 rounded flex flex-col relative group/item overflow-hidden
                                                 ${item ? 'hover:border-zinc-600' : 'opacity-50'}
                                             `}
+                                            onMouseEnter={() => item && onHoverItem?.(item)}
+                                            onMouseLeave={() => onHoverItem?.(null)}
                                         >
                                             {item ? (
                                                 <>
@@ -303,6 +309,26 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                         </div>
                     )}
                 </div>
+
+                {/* Discard Drop Zone */}
+                {draggedItemType && (
+                    <div 
+                        className="mt-2 h-16 border-2 border-dashed border-red-500/30 bg-red-950/10 rounded-lg flex flex-col items-center justify-center text-red-500/70 transition-all duration-300 hover:bg-red-950/30 hover:border-red-500 hover:text-red-400"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            const itemId = e.dataTransfer.getData('itemId');
+                            const item = inventory.find(i => i.id === itemId);
+                            if (item) onDiscard(item);
+                            setDraggedItemType(null);
+                        }}
+                    >
+                        <div className="flex items-center gap-2 pointer-events-none">
+                            <Skull size={16} />
+                            <span className="font-bold uppercase tracking-widest text-[10px]">Drop to Discard</span>
+                        </div>
+                    </div>
+                )}
                 
                 <div className="text-[10px] text-zinc-800 text-center mt-auto opacity-50 hover:opacity-100 transition-opacity pb-2">
                     Drag items to equip/unequip

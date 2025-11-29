@@ -48,8 +48,12 @@ const getRiskAssessment = (difficulty: number, statVal: number) => {
 
 const getRiskColorHSL = (percentage: number) => {
     // Map 0-100% to Hue 0 (Red) - 120 (Green)
+    // Darker, less saturated palette
     const hue = Math.max(0, Math.min(120, percentage * 1.2));
-    return `hsl(${hue}, 80%, 45%)`;
+    const saturation = 60; // Reduced from 80%
+    const lightness = 25 + (percentage * 0.25); // Range from 25% (dark) to 50% (normal)
+    
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
 
 const getStatConfig = (stat: string) => {
@@ -91,7 +95,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>({
     imageSize: ImageSize.Size_2K,
     storyModel: StoryModel.Smart,
-    uiScale: UIScale.Normal,
+    uiScale: 1,
     enableDiceRolls: true
   });
 
@@ -122,6 +126,7 @@ const App: React.FC = () => {
   
   // Highlighting State for Interactions
   const [hoveredStat, setHoveredStat] = useState<StatType | null>(null);
+  const [hoveredInventoryItem, setHoveredInventoryItem] = useState<InventoryItem | null>(null);
 
   const checkApiKey = async () => {
     if ((window as any).aistudio && (window as any).aistudio.hasSelectedApiKey) {
@@ -153,9 +158,8 @@ const App: React.FC = () => {
   }, [gameState.phase, gameState.finalSummary, gameState.history, hasApiKey]);
 
   // Derived Stats Calculation
-  const currentStats = useMemo(() => {
-      const { stats, equipped, activeEffects } = gameState;
-      const calculated = { ...stats };
+  const calculateStats = (baseStats: CharacterStats, equipped: EquippedGear, activeEffects: StatusEffect[], extraItem?: InventoryItem) => {
+      const calculated = { ...baseStats };
       
       const applyBonus = (bonuses: Partial<CharacterStats> | undefined) => {
           if (!bonuses) return;
@@ -168,16 +172,32 @@ const App: React.FC = () => {
           if (bonuses.LUK) calculated.LUK += bonuses.LUK;
       };
 
-      applyBonus(equipped.weapon?.bonuses);
-      applyBonus(equipped.armor?.bonuses);
-      applyBonus(equipped.accessory?.bonuses);
+      // If we are previewing an item, we need to skip the currently equipped item in that slot
+      const skipSlot = extraItem ? (extraItem.type === 'weapon' ? 'weapon' : extraItem.type === 'armor' ? 'armor' : extraItem.type === 'accessory' ? 'accessory' : null) : null;
+
+      if (skipSlot !== 'weapon') applyBonus(equipped.weapon?.bonuses);
+      if (skipSlot !== 'armor') applyBonus(equipped.armor?.bonuses);
+      if (skipSlot !== 'accessory') applyBonus(equipped.accessory?.bonuses);
       
+      if (extraItem) applyBonus(extraItem.bonuses);
+
       activeEffects?.forEach(effect => {
           applyBonus(effect.statModifiers);
       });
       
       return calculated;
+  };
+
+  const currentStats = useMemo(() => {
+      return calculateStats(gameState.stats, gameState.equipped, gameState.activeEffects);
   }, [gameState.stats, gameState.equipped, gameState.activeEffects]);
+
+  const previewStats = useMemo(() => {
+      if (!hoveredInventoryItem) return currentStats;
+      if (!['weapon', 'armor', 'accessory'].includes(hoveredInventoryItem.type)) return currentStats;
+      
+      return calculateStats(gameState.stats, gameState.equipped, gameState.activeEffects, hoveredInventoryItem);
+  }, [gameState.stats, gameState.equipped, gameState.activeEffects, hoveredInventoryItem, currentStats]);
 
   const handleSelectKey = async () => {
     if ((window as any).aistudio && (window as any).aistudio.openSelectKey) {
@@ -227,6 +247,7 @@ const App: React.FC = () => {
               }
           };
       });
+      setDraggedItemType(null);
   };
 
   const handleUnequip = (item: InventoryItem) => {
@@ -250,6 +271,7 @@ const App: React.FC = () => {
               inventory: [...prev.inventory, item]
           };
       });
+      setDraggedItemType(null);
   };
 
   const handleDiscard = (item: InventoryItem) => {
@@ -794,16 +816,23 @@ const App: React.FC = () => {
   return (
     <div 
       className="flex h-screen bg-black text-zinc-100 font-sans overflow-hidden relative transition-all duration-300"
-      style={{ zoom: settings.uiScale || 1 }}
+      style={{ 
+          zoom: settings.uiScale || 1,
+          // Compensate for zoom to keep viewport fitting exactly
+          width: `${100 / (settings.uiScale || 1)}vw`,
+          height: `${100 / (settings.uiScale || 1)}vh`
+      }}
     >
       
-      {/* --- Settings Button --- */}
-      <button
-        onClick={() => setShowSettings(true)}
-        className="fixed top-4 right-4 z-[60] p-2 bg-zinc-800/80 backdrop-blur hover:bg-zinc-700 rounded-full text-zinc-400 border border-zinc-700 transition-colors"
-      >
-        <Settings size={20} />
-      </button>
+      {/* --- Settings Button (Menu & Setup Phases) --- */}
+      {gameState.phase !== 'playing' && gameState.phase !== 'game_over' && (
+        <button
+            onClick={() => setShowSettings(true)}
+            className="fixed top-4 right-4 z-[60] p-2 bg-zinc-800/80 backdrop-blur hover:bg-zinc-700 rounded-full text-zinc-400 border border-zinc-700 transition-colors"
+        >
+            <Settings size={20} />
+        </button>
+      )}
 
       {/* --- Dice Roller Overlay --- */}
       {gameState.isRolling && pendingChoice && pendingChoice.type && (
@@ -874,6 +903,7 @@ const App: React.FC = () => {
 
           <LeftSidebar 
             stats={currentStats}
+            previewStats={previewStats}
             baseStats={gameState.stats}
             hp={gameState.hp}
             maxHp={gameState.maxHp}
@@ -887,7 +917,15 @@ const App: React.FC = () => {
             draggedItemType={draggedItemType}
           />
 
-          <main className="flex-1 flex flex-col relative w-full h-full max-w-5xl mx-auto bg-zinc-950 border-x border-zinc-900 shadow-2xl z-10">
+          <main className="flex-1 flex flex-col relative w-full h-full max-w-5xl mx-auto bg-zinc-950 border-x border-zinc-900 shadow-2xl z-10 overflow-y-auto custom-scrollbar">
+            {/* In-Game Settings Button */}
+            <button
+                onClick={() => setShowSettings(true)}
+                className="absolute top-4 right-6 z-50 p-2 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200 rounded-full border border-zinc-800 transition-all backdrop-blur-sm"
+            >
+                <Settings size={20} />
+            </button>
+
             <StoryFeed history={gameState.history} isThinking={gameState.isLoading} />
 
             <div className={`
@@ -898,27 +936,9 @@ const App: React.FC = () => {
                  {gameState.phase !== 'game_over' ? (
                     <div className="flex flex-col gap-4 relative">
                         
-                        {/* Trash Bin Drop Zone */}
-                        {draggedItemType && (
-                            <div 
-                                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-64 h-24 border-2 border-dashed border-red-500/50 bg-red-950/20 rounded-xl flex flex-col items-center justify-center text-red-500 animate-pulse z-50 backdrop-blur-sm"
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => {
-                                    e.preventDefault();
-                                    const itemId = e.dataTransfer.getData('itemId');
-                                    const item = gameState.inventory.find(i => i.id === itemId);
-                                    if (item) handleDiscard(item);
-                                    setDraggedItemType(null);
-                                }}
-                            >
-                                <Skull size={32} />
-                                <span className="font-bold uppercase tracking-widest text-xs mt-2">Drop to Discard</span>
-                            </div>
-                        )}
-
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {currentChoices.map((choice, idx) => {
-                            const statVal = choice.type ? currentStats[choice.type] : 0;
+                            const statVal = choice.type ? previewStats[choice.type] : 0;
                             const risk = (settings.enableDiceRolls && choice.type && choice.difficulty) 
                                 ? getRiskAssessment(choice.difficulty, statVal) 
                                 : null;
@@ -962,8 +982,12 @@ const App: React.FC = () => {
                                         <div className="absolute bottom-0 left-0 right-0 h-6 bg-black/40 flex items-center px-4 border-t border-white/5">
                                             {/* Background fill */}
                                             <div 
-                                                className="absolute left-0 top-0 bottom-0 opacity-20 transition-all duration-700 ease-out"
-                                                style={{ width: `${risk.chance}%`, backgroundColor: riskColor }}
+                                                className="absolute left-0 top-0 bottom-0 opacity-20"
+                                                style={{ 
+                                                    width: `${risk.chance}%`, 
+                                                    backgroundColor: riskColor,
+                                                    transition: 'width 0.5s ease-out' 
+                                                }}
                                             />
                                             
                                             {/* Text */}
@@ -977,8 +1001,13 @@ const App: React.FC = () => {
 
                                             {/* Bottom thin line */}
                                             <div 
-                                                className="absolute bottom-0 left-0 h-[2px] transition-all duration-700 ease-out shadow-[0_0_10px_currentColor]" 
-                                                style={{ width: `${risk.chance}%`, backgroundColor: riskColor, color: riskColor }} 
+                                                className="absolute bottom-0 left-0 h-[2px] shadow-[0_0_10px_currentColor]" 
+                                                style={{ 
+                                                    width: `${risk.chance}%`, 
+                                                    backgroundColor: riskColor, 
+                                                    color: riskColor,
+                                                    transition: 'width 0.5s ease-out'
+                                                }} 
                                             />
                                         </div>
                                      ) : (
@@ -1041,7 +1070,9 @@ const App: React.FC = () => {
             onUnequip={handleUnequip}
             onDiscard={handleDiscard}
             setDraggedItemType={setDraggedItemType}
+            draggedItemType={draggedItemType}
             mainStoryArc={gameState.mainStoryArc}
+            onHoverItem={setHoveredInventoryItem}
           />
         </>
       )}

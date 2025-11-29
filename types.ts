@@ -168,11 +168,7 @@ export enum StoryModel {
   Fast = "gemini-2.5-flash",
 }
 
-export enum UIScale {
-  Compact = 0.85,
-  Normal = 1,
-  Large = 1.15
-}
+export type UIScale = number;
 
 export interface AppSettings {
   imageSize: ImageSize;
