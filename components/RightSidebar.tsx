@@ -76,15 +76,32 @@ const getNPCIcon = (type: string, condition: string) => {
 
 const getRewardLabel = (quest: SideQuest) => {
     switch (quest.reward) {
-        case 'level_up': return "Level Up";
+        case 'level_up': return <span className="text-amber-400 font-bold">+1 Any Stat</span>;
         case 'heal_hp': return `Heal ${quest.rewardValue || 0} HP`;
         case 'restore_custom_choice': return "Restore Heroic Action";
-        case 'item': return quest.rewardItem ? quest.rewardItem.name : "Rare Item";
+        case 'item': 
+            if (quest.rewardItem) {
+                return (
+                    <div className="flex flex-col gap-0.5">
+                        <span className="font-bold text-zinc-300">{quest.rewardItem.name}</span>
+                        <div className="flex items-center gap-2 text-[9px] opacity-80">
+                            <span className="uppercase tracking-wider text-zinc-500">{quest.rewardItem.type}</span>
+                            {quest.rewardItem.bonuses && (
+                                <span className="text-emerald-500 font-mono">
+                                    {Object.entries(quest.rewardItem.bonuses).map(([k, v]) => `+${v} ${k}`).join(', ')}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+            return "Rare Item";
         case 'max_hp_boost': return `+${quest.rewardValue || 0} Max HP`;
         case 'heroic_refill': return "Refill Heroic Actions";
-        case 'reroll_token': return "Token of Fate";
+        case 'reroll_token': return "Token of Fate (+1 Reroll)";
         case 'upgrade_equipped': return "Upgrade Weapon";
         case 'legendary_item': return "Legendary Item";
+        case 'stat_boost': return <span className="text-emerald-400 font-bold">+{quest.rewardValue || 1} {quest.statTarget}</span>;
         default: return "Unknown Reward";
     }
 };

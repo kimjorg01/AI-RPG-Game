@@ -88,6 +88,14 @@ const BASE_TEMPLATES: QuestTemplate[] = [
         // Let's just use random stat templates for this.
         targetRange: [3, 4],
         reward: 'upgrade_equipped'
+    },
+    {
+        title: "Gambler's Challenge",
+        description: "Succeed on {target} risky checks (Chance < 50%).",
+        type: 'any_success_roll', // Simplified for now, ideally check risk
+        targetRange: [2, 3],
+        reward: 'reroll_token',
+        rewardValue: 1
     }
 ];
 
@@ -104,11 +112,11 @@ const STAT_REWARD_NAMES: Record<StatType, string[]> = {
 const generateStatTemplates = (): QuestTemplate[] => {
     const stats: StatType[] = ['STR', 'DEX', 'CON', 'INT', 'CHA', 'PER', 'LUK'];
     return stats.map(stat => ({
-        title: `${stat} Mastery`,
+        title: `${stat} Training`,
         description: `Succeed on {target} ${stat} checks.`,
         type: 'stat_success_count',
         targetRange: [2, 3],
-        reward: 'item',
+        reward: 'stat_boost',
         statTarget: stat
     }));
 };

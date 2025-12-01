@@ -16,7 +16,7 @@ import { generateStoryStep, generateGameSummary, generateStoryboard, generateMai
 import { createItemFromString } from './services/itemFactory';
 import { inferStatFromText } from './services/statInference';
 import { generateSideQuests, checkQuestProgress } from './services/questSystem';
-import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal, Loader2 } from 'lucide-react';
+import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal, Loader2, RefreshCw, ChevronRight } from 'lucide-react';
 import { DebugConsole, LogEntry } from './components/DebugConsole';
 
 const BASE_HP = 100;
@@ -103,10 +103,10 @@ const App: React.FC = () => {
     statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0, LUK: 0 },
     activeEffects: [],
     startingStats: DEFAULT_STATS,
-    customChoicesRemaining: 3,
+    customChoicesRemaining: 1,
     activeSideQuests: [],
     pendingLevelUps: 0,
-    rerollTokens: 0
+    rerollTokens: 1
   });
 
   const [settings, setSettings] = useState<AppSettings>({
@@ -123,6 +123,11 @@ const App: React.FC = () => {
   const [currentChoices, setCurrentChoices] = useState<ChoiceData[]>([]);
   const [hasApiKey, setHasApiKey] = useState(false);
   
+  // New State for Reroll Logic
+  const [waitingForProceed, setWaitingForProceed] = useState(false);
+  const [pendingRollResult, setPendingRollResult] = useState<RollResult | null>(null);
+  const [pendingLevelUp, setPendingLevelUp] = useState<LevelUpEvent | undefined>(undefined);
+
   // Drag and Drop State
   const [draggedItemType, setDraggedItemType] = useState<string | null>(null);
   
@@ -472,15 +477,41 @@ const App: React.FC = () => {
 
       setPendingChoice(choice);
       setPendingRoll(rollBase);
+      setPendingRollResult(result);
+      setPendingLevelUp(levelUpEvent);
       
-      // Start AI Request Immediately
-      processTurn(choice.text, result, null, levelUpEvent);
+      // Wait for animation to complete (handled in handleRollComplete)
 
     } else {
       processTurn(choice.text, null, null);
     }
   };
 
+  const handleRollComplete = (rollBase: number) => {
+    setGameState(prev => ({ ...prev, isRolling: false }));
+    setWaitingForProceed(true);
+  };
+
+  const handleProceed = () => {
+      if (!pendingChoice || !pendingRollResult) return;
+      setWaitingForProceed(false);
+      setPendingChoice(null);
+      setPendingRoll(null);
+      setPendingRollResult(null);
+      setPendingLevelUp(undefined);
+      processTurn(pendingChoice.text, pendingRollResult, null, pendingLevelUp);
+  };
+
+  const handleReroll = () => {
+      if (gameState.rerollTokens <= 0 || !pendingChoice) return;
+      
+      // Consume Token
+      setGameState(prev => ({ ...prev, rerollTokens: prev.rerollTokens - 1 }));
+      setWaitingForProceed(false);
+      
+      // Trigger Roll Again
+      handleChoiceClick(pendingChoice);
+  };
   const handleCustomChoiceSubmit = (text: string, itemId: string | null) => {
      if (gameState.customChoicesRemaining <= 0) return;
      if (isHeroicBlocked) {
@@ -502,12 +533,6 @@ const App: React.FC = () => {
      const roll = Math.floor(Math.random() * 20) + 1;
      setGameState(prev => ({ ...prev, customChoicesRemaining: prev.customChoicesRemaining - 1 }));
      processTurn(text, null, { text, item: itemName, roll });
-  };
-
-  const handleRollComplete = (rollBase: number) => {
-    setGameState(prev => ({ ...prev, isRolling: false }));
-    setPendingChoice(null);
-    setPendingRoll(null);
   };
 
   const handleStopRequest = () => {
@@ -876,6 +901,8 @@ const App: React.FC = () => {
       let newRerollTokens = prev.rerollTokens;
       let newEquipped = { ...prev.equipped };
 
+      let newStats = { ...prev.stats };
+
       // Apply Reward
       switch (quest.reward) {
         case 'heal_hp':
@@ -884,11 +911,17 @@ const App: React.FC = () => {
           break;
         case 'restore_custom_choice':
           newCustomChoices += (quest.rewardValue || 1);
-          addLog('response', `Reward: Restored ${quest.rewardValue || 1} Custom Choice(s)!`);
+          addLog('response', `Reward: Restored ${quest.rewardValue || 1} Heroic Action(s)!`);
           break;
         case 'level_up':
           newPendingLevelUps += 1;
           addLog('response', `Reward: Level Up!`);
+          break;
+        case 'stat_boost':
+          if (quest.statTarget) {
+              newStats[quest.statTarget] = (newStats[quest.statTarget] || 0) + 1;
+              addLog('response', `Reward: +1 ${quest.statTarget}!`);
+          }
           break;
         case 'item':
           if (quest.rewardItem && newInventory.length < 8) {
@@ -900,8 +933,8 @@ const App: React.FC = () => {
           break;
         case 'heroic_refill':
           newHp = newMaxHp;
-          newCustomChoices = 3; 
-          addLog('response', 'Reward: Heroic Refill! HP and Choices restored.');
+          newCustomChoices += 3; 
+          addLog('response', 'Reward: Heroic Refill! HP restored and +3 Heroic Actions.');
           break;
         case 'max_hp_boost':
           newMaxHp += (quest.rewardValue || 10);
@@ -946,7 +979,8 @@ const App: React.FC = () => {
         inventory: newInventory,
         rerollTokens: newRerollTokens,
         equipped: newEquipped,
-        activeSideQuests: remainingQuests
+        activeSideQuests: remainingQuests,
+        stats: newStats
       };
     });
   };
@@ -958,8 +992,17 @@ const App: React.FC = () => {
 
       const lastTurn = gameState.history[gameState.history.length - 1];
       
+      // FIX: Only process on AI response (completion of a full turn cycle)
+      // This prevents double-counting turns and ensures we have the final state (items, hp)
+      if (lastTurn.isUserTurn) return;
+
+      // For roll-based quests, we need the User's turn (where the roll happened), 
+      // which is usually the one immediately preceding this AI response.
+      const previousTurn = gameState.history.length >= 2 ? gameState.history[gameState.history.length - 2] : null;
+      const turnToCheck = (previousTurn && previousTurn.isUserTurn) ? previousTurn : lastTurn;
+      
       // 1. Check Progress of Active Quests
-      const { updatedQuests } = checkQuestProgress(gameState, lastTurn);
+      const { updatedQuests } = checkQuestProgress(gameState, turnToCheck);
       
       // 2. Refresh Available Quests (User Request: "refresh each turn if not accepted")
       const keptQuests = updatedQuests.filter(q => q.status !== 'available');
@@ -1004,7 +1047,7 @@ const App: React.FC = () => {
         statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0 },
         activeEffects: [],
         startingStats: DEFAULT_STATS,
-        customChoicesRemaining: 3,
+        customChoicesRemaining: 1,
         finalSummary: undefined,
         finalStoryboard: undefined
     });
@@ -1127,14 +1170,42 @@ const App: React.FC = () => {
       )}
 
       {/* --- Dice Roller Overlay --- */}
-      {gameState.isRolling && pendingChoice && pendingChoice.type && (
+      {(gameState.isRolling || waitingForProceed) && pendingChoice && pendingChoice.type && (
         <DiceRoller
           modifier={getMod(currentStats[pendingChoice.type])}
           target={pendingChoice.difficulty || 10}
           statLabel={pendingChoice.type}
           onComplete={handleRollComplete}
           precalculatedRoll={pendingRoll || undefined}
-        />
+        >
+            {waitingForProceed && (
+                <div className="flex gap-4 w-full justify-center">
+                      <button 
+                          onClick={handleReroll}
+                          disabled={gameState.rerollTokens <= 0}
+                          className={`
+                              flex-1 py-3 px-4 rounded border font-bold uppercase tracking-wider text-xs flex flex-col items-center gap-1 transition-all
+                              ${gameState.rerollTokens > 0 
+                                  ? 'bg-zinc-900 border-amber-900/50 text-amber-500 hover:bg-amber-950/30 hover:border-amber-500' 
+                                  : 'bg-zinc-900/50 border-zinc-800 text-zinc-600 cursor-not-allowed'}
+                          `}
+                      >
+                          <div className="flex items-center gap-2">
+                              <RefreshCw size={14} />
+                              Reroll
+                          </div>
+                          <span className="text-[9px] opacity-60">{gameState.rerollTokens} Token(s) Left</span>
+                      </button>
+
+                      <button 
+                          onClick={handleProceed}
+                          className="flex-1 py-3 px-4 bg-zinc-100 hover:bg-white text-black rounded font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center gap-2"
+                      >
+                          Proceed <ChevronRight size={14} />
+                      </button>
+                </div>
+            )}
+        </DiceRoller>
       )}
 
       {/* --- Main Menu Phase --- */}

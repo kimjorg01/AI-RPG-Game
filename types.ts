@@ -97,7 +97,7 @@ export interface RollResult {
 }
 
 export type QuestType = 'roll_streak' | 'turn_count' | 'hp_threshold' | 'stat_check_count' | 'inventory_count' | 'any_success_roll' | 'stat_success_count' | 'natural_20' | 'close_call' | 'fully_equipped';
-export type QuestRewardType = 'level_up' | 'heal_hp' | 'restore_custom_choice' | 'item' | 'max_hp_boost' | 'reroll_token' | 'upgrade_equipped' | 'legendary_item' | 'heroic_refill';
+export type QuestRewardType = 'level_up' | 'heal_hp' | 'restore_custom_choice' | 'item' | 'max_hp_boost' | 'reroll_token' | 'upgrade_equipped' | 'legendary_item' | 'heroic_refill' | 'stat_boost';
 
 export interface SideQuest {
     id: string;
