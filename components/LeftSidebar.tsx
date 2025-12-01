@@ -133,6 +133,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<0 | 1>(0);
+  const [hoveredEffect, setHoveredEffect] = useState<StatusEffect | null>(null);
   
   // Calculate HP percentage
   const hpPercent = Math.max(0, Math.min(100, (hp / maxHp) * 100));
@@ -267,9 +268,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         <div 
                             key={idx} 
                             className="group relative cursor-help"
-                            onMouseEnter={() => {
-                                // Logic to highlight stats controlled by sidebar logic if needed
-                            }}
+                            onMouseEnter={() => setHoveredEffect(effect)}
+                            onMouseLeave={() => setHoveredEffect(null)}
                         >
                             <div className={`
                             flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-colors
@@ -394,12 +394,23 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             const displayVal = previewVal;
                             const mod = getMod(displayVal);
                             const config = STAT_CONFIG[key];
-                            const isHighlighted = highlightedStat === key;
+                            
+                            // Check if this stat is affected by the hovered effect
+                            const effectMod = hoveredEffect?.statModifiers?.[key];
+                            const isEffectTarget = effectMod !== undefined;
+                            
+                            const isHighlighted = highlightedStat === key || isEffectTarget;
                             
                             // Determine color based on diff
                             let valColor = "text-zinc-200";
                             if (diff > 0) valColor = "text-emerald-400";
                             if (diff < 0) valColor = "text-red-400";
+                            
+                            // Override color if effect target
+                            if (isEffectTarget) {
+                                if (effectMod > 0) valColor = "text-emerald-400 animate-pulse";
+                                if (effectMod < 0) valColor = "text-red-400 animate-pulse";
+                            }
                             
                             return (
                                 <div 
@@ -408,6 +419,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                                         flex flex-col items-center justify-center py-1 rounded border transition-all duration-200 shrink-0
                                         ${isHighlighted ? config.glow + ' bg-zinc-900' : 'border-transparent hover:bg-zinc-900/30'}
                                         ${diff !== 0 ? 'bg-zinc-900 ring-1 ring-inset ' + (diff > 0 ? 'ring-emerald-500/30' : 'ring-red-500/30') : ''}
+                                        ${isEffectTarget ? (effectMod > 0 ? 'ring-1 ring-emerald-500 bg-emerald-900/20' : 'ring-1 ring-red-500 bg-red-900/20') : ''}
                                     `}
                                 >
                                     <span className={`text-[9px] font-bold ${config.text}`}>{config.abbr}</span>

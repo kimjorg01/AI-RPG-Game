@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef } from 'react';
-import { StoryTurn } from '../types';
-import { Sparkles, Dices, CheckCircle2, XCircle, Plus, Minus, ArrowUpCircle, StopCircle, RefreshCw } from 'lucide-react';
+import { StoryTurn, GameStatus } from '../types';
+import { Sparkles, Dices, CheckCircle2, XCircle, Plus, Minus, ArrowUpCircle, StopCircle, RefreshCw, Trophy, Skull } from 'lucide-react';
 
 interface StoryFeedProps {
   history: StoryTurn[];
@@ -9,6 +9,8 @@ interface StoryFeedProps {
   onStop?: () => void;
   onRetry?: () => void;
   showRetry?: boolean;
+  gameStatus?: GameStatus;
+  onOpenGameOver?: () => void;
 }
 
 // Simple text parser for bold markdown
@@ -22,7 +24,7 @@ const parseText = (text: string) => {
     });
 };
 
-export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking, onStop, onRetry, showRetry }) => {
+export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking, onStop, onRetry, showRetry, gameStatus, onOpenGameOver }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -154,6 +156,24 @@ export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking, onSto
                   Retry Request
               </button>
           </div>
+      )}
+
+      {/* Game Over Button */}
+      {gameStatus && gameStatus !== 'ongoing' && onOpenGameOver && (
+        <div className="max-w-3xl mx-auto flex justify-center py-8 animate-fadeIn">
+            <button 
+                onClick={onOpenGameOver}
+                className={`
+                    px-8 py-4 rounded-lg font-bold shadow-lg hover:scale-105 transition-all flex items-center gap-3 border
+                    ${gameStatus === 'won' 
+                        ? 'bg-amber-900/20 hover:bg-amber-900/40 border-amber-500/50 text-amber-400' 
+                        : 'bg-red-900/20 hover:bg-red-900/40 border-red-500/50 text-red-400'}
+                `}
+            >
+                {gameStatus === 'won' ? <Trophy size={24} /> : <Skull size={24} />}
+                <span className="cinzel text-lg">View End Screen</span>
+            </button>
+        </div>
       )}
 
       <div ref={bottomRef} />

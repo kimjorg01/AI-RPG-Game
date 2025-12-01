@@ -126,6 +126,7 @@ export interface GameState {
   hp: number;
   maxHp: number;
   hpHistory: number[]; // For the graph
+  statHistory: CharacterStats[]; // For the graph
   gameStatus: GameStatus;
   phase: GamePhase;
   genre: string;

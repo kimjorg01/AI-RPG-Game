@@ -16,7 +16,8 @@ import { generateStoryStep, generateGameSummary, generateStoryboard, generateMai
 import { createItemFromString } from './services/itemFactory';
 import { inferStatFromText } from './services/statInference';
 import { generateSideQuests, checkQuestProgress } from './services/questSystem';
-import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal, Loader2, RefreshCw, ChevronRight } from 'lucide-react';
+import { calculateInjury, calculateHotStreak } from './services/statusEffects';
+import { Menu, Send, Settings, Dices, AlertTriangle, CheckCircle2, Skull, Sparkles, User, Backpack, Sword, Zap, Shield, Brain, Crown, Circle, Eye, Clover, Terminal, Loader2, RefreshCw, ChevronRight, Trophy } from 'lucide-react';
 import { DebugConsole, LogEntry } from './components/DebugConsole';
 
 const BASE_HP = 100;
@@ -95,6 +96,7 @@ const App: React.FC = () => {
     hp: BASE_HP,
     maxHp: BASE_HP,
     hpHistory: [BASE_HP], 
+    statHistory: [DEFAULT_STATS],
     gameStatus: 'ongoing',
     phase: 'menu',
     genre: 'Fantasy',
@@ -123,10 +125,14 @@ const App: React.FC = () => {
   const [currentChoices, setCurrentChoices] = useState<ChoiceData[]>([]);
   const [hasApiKey, setHasApiKey] = useState(false);
   
+  // Game Over Screen State
+  const [showGameOverScreen, setShowGameOverScreen] = useState(false);
+
   // New State for Reroll Logic
   const [waitingForProceed, setWaitingForProceed] = useState(false);
   const [pendingRollResult, setPendingRollResult] = useState<RollResult | null>(null);
   const [pendingLevelUp, setPendingLevelUp] = useState<LevelUpEvent | undefined>(undefined);
+  const [pendingStatusEffect, setPendingStatusEffect] = useState<StatusEffect | null>(null);
 
   // Drag and Drop State
   const [draggedItemType, setDraggedItemType] = useState<string | null>(null);
@@ -134,6 +140,13 @@ const App: React.FC = () => {
   // Debug Console State
   const [showDebug, setShowDebug] = useState(false);
   const [debugLogs, setDebugLogs] = useState<LogEntry[]>([]);
+
+  // Auto-open Game Over screen when game ends
+  useEffect(() => {
+    if (gameState.gameStatus !== 'ongoing') {
+      setShowGameOverScreen(true);
+    }
+  }, [gameState.gameStatus]);
 
   const addLog = (type: 'request' | 'response' | 'error' | 'info', content: any) => {
     setDebugLogs(prev => [...prev, {
@@ -359,12 +372,14 @@ const App: React.FC = () => {
   const handleLevelUp = (stat: StatType) => {
       setGameState(prev => {
           if (prev.pendingLevelUps <= 0) return prev;
+          const newStats = {
+              ...prev.stats,
+              [stat]: prev.stats[stat] + 1
+          };
           return {
               ...prev,
-              stats: {
-                  ...prev.stats,
-                  [stat]: prev.stats[stat] + 1
-              },
+              stats: newStats,
+              statHistory: [...(prev.statHistory || []), newStats],
               pendingLevelUps: prev.pendingLevelUps - 1
           };
       });
@@ -380,6 +395,7 @@ const App: React.FC = () => {
         npcs: [],
         equipped: { weapon: null, armor: null, accessory: null },
         hpHistory: [BASE_HP],
+        statHistory: [DEFAULT_STATS],
         statExperience: { STR: 0, DEX: 0, CON: 0, INT: 0, CHA: 0, PER: 0, LUK: 0 },
         activeEffects: [],
         customChoicesRemaining: 3,
@@ -399,6 +415,7 @@ const App: React.FC = () => {
         ...prev, 
         stats, 
         startingStats: stats, 
+        statHistory: [stats],
         phase: 'creating_world' 
     }));
     
@@ -446,6 +463,12 @@ const App: React.FC = () => {
       };
 
       let levelUpEvent: LevelUpEvent | undefined = undefined;
+      
+      // Check for Hot Streak
+      const hotStreakEffect = calculateHotStreak(gameState.history, result);
+      if (hotStreakEffect) {
+          addLog('info', `Hot Streak! ${hotStreakEffect.description}`);
+      }
 
       // Update State for Roll & XP
       setGameState(prev => {
@@ -479,6 +502,7 @@ const App: React.FC = () => {
       setPendingRoll(rollBase);
       setPendingRollResult(result);
       setPendingLevelUp(levelUpEvent);
+      setPendingStatusEffect(hotStreakEffect);
       
       // Wait for animation to complete (handled in handleRollComplete)
 
@@ -499,7 +523,8 @@ const App: React.FC = () => {
       setPendingRoll(null);
       setPendingRollResult(null);
       setPendingLevelUp(undefined);
-      processTurn(pendingChoice.text, pendingRollResult, null, pendingLevelUp);
+      setPendingStatusEffect(null);
+      processTurn(pendingChoice.text, pendingRollResult, null, pendingLevelUp, undefined, pendingStatusEffect || undefined);
   };
 
   const handleReroll = () => {
@@ -546,15 +571,16 @@ const App: React.FC = () => {
       setShowRetry(false);
       setGameState(prev => ({ ...prev, isLoading: true }));
       
-      const { userText, rollResult, customAction, overrideArc } = lastTurnParams;
-      generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc);
+      const { userText, rollResult, customAction, overrideArc, decrementedEffects } = lastTurnParams;
+      generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc, decrementedEffects);
   };
 
   const generateAndProcessAIResponse = async (
       userText: string,
       rollResult: RollResult | null,
       customAction: { text: string, item: string, roll: number } | null,
-      overrideArc: MainStoryArc | undefined
+      overrideArc: MainStoryArc | undefined,
+      currentEffects: StatusEffect[]
   ) => {
       const currentRequestId = ++requestIdRef.current;
 
@@ -620,6 +646,16 @@ const App: React.FC = () => {
               });
           }
 
+          // Calculate Injury OUTSIDE setGameState to avoid side-effect duplication
+          const hpChange = aiResponse.hp_change || 0;
+          const newHp = Math.min(gameState.maxHp, Math.max(0, gameState.hp + hpChange));
+          const hpLoss = gameState.hp - newHp;
+          const injuryEffect = calculateInjury(hpLoss, currentEffects);
+          
+          if (injuryEffect) {
+              addLog('info', `Injury Sustained! ${injuryEffect.description}`);
+          }
+
           setGameState(prev => {
               const newItems: InventoryItem[] = (aiResponse.inventory_added || []).map(aiItem => {
                   const factoryItem = createItemFromString(aiItem.name);
@@ -679,6 +715,12 @@ const App: React.FC = () => {
               if (newHp <= 0) {
                   status = 'lost';
                   newHp = 0;
+              }
+              
+              // Use pre-calculated injury
+              let currentEffects = [...prev.activeEffects];
+              if (injuryEffect) {
+                  currentEffects.push(injuryEffect);
               }
 
               // --- Act / Quest Progression Logic ---
@@ -819,7 +861,8 @@ const App: React.FC = () => {
                   statExperience: finalStatExp,
                   gameStatus: status as any,
                   phase: status === 'ongoing' ? 'playing' : 'game_over',
-                  mainStoryArc: currentArc || prev.mainStoryArc
+                  mainStoryArc: currentArc || prev.mainStoryArc,
+                  activeEffects: currentEffects
               };
           });
 
@@ -839,7 +882,8 @@ const App: React.FC = () => {
       rollResult: RollResult | null, 
       customAction: { text: string, item: string, roll: number } | null,
       levelUpEvent?: LevelUpEvent,
-      overrideArc?: MainStoryArc
+      overrideArc?: MainStoryArc,
+      newStatusEffect?: StatusEffect
   ) => {
     
     const userTurn: StoryTurn = {
@@ -855,6 +899,10 @@ const App: React.FC = () => {
     const decrementedEffects = (gameState.activeEffects || [])
         .map(e => ({ ...e, duration: e.duration - 1 }))
         .filter(e => e.duration > 0);
+    
+    if (newStatusEffect) {
+        decrementedEffects.push(newStatusEffect);
+    }
 
     setLastTurnParams({
         userText,
@@ -874,7 +922,7 @@ const App: React.FC = () => {
     });
 
     // Call the helper
-    generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc);
+    generateAndProcessAIResponse(userText, rollResult, customAction, overrideArc, decrementedEffects);
   };
 
   // --- Quest Handlers ---
@@ -1300,7 +1348,7 @@ const App: React.FC = () => {
 
             <div className={`
                 p-4 md:p-6 z-20 sticky bottom-0 transition-all duration-500
-                ${gameState.phase === 'game_over' ? 'bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-lg h-[80vh] overflow-y-auto absolute bottom-0 w-full' : 'bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent'}
+                ${gameState.phase === 'game_over' ? 'bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-lg' : 'bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent'}
             `}>
               <div className="max-w-4xl mx-auto">
                  {gameState.phase !== 'game_over' ? (
@@ -1412,23 +1460,37 @@ const App: React.FC = () => {
                         </button>
                     </div>
                  ) : (
-                   <GameOverScreen 
-                      gameStatus={gameState.gameStatus}
-                      history={gameState.history}
-                      stats={currentStats}
-                      startingStats={gameState.startingStats}
-                      hpHistory={gameState.hpHistory}
-                      maxHp={gameState.maxHp}
-                      summary={gameState.finalSummary}
-                      storyboardUrl={gameState.finalStoryboard}
-                      onDownloadLog={handleDownloadLog}
-                      onRestart={handleRestart}
-                      onRegenerateImage={handleRegenerateImage}
-                   />
+                    <div className="flex flex-col items-center justify-center py-4 gap-3">
+                        <p className="text-zinc-500 italic font-serif text-sm">The story has ended.</p>
+                        <button 
+                            onClick={() => setShowGameOverScreen(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-full text-xs font-bold uppercase tracking-wider transition-all border border-zinc-700 hover:border-zinc-500"
+                        >
+                            <Trophy size={14} className={gameState.gameStatus === 'won' ? "text-amber-500" : "text-zinc-500"} />
+                            View Results
+                        </button>
+                    </div>
                  )}
               </div>
             </div>
           </main>
+          
+          <GameOverScreen 
+            isOpen={showGameOverScreen}
+            onClose={() => setShowGameOverScreen(false)}
+            gameStatus={gameState.gameStatus}
+            history={gameState.history}
+            stats={currentStats}
+            startingStats={gameState.startingStats}
+            hpHistory={gameState.hpHistory}
+            statHistory={gameState.statHistory}
+            maxHp={gameState.maxHp}
+            summary={gameState.finalSummary}
+            storyboardUrl={gameState.finalStoryboard}
+            onDownloadLog={handleDownloadLog}
+            onRestart={handleRestart}
+            onRegenerateImage={handleRegenerateImage}
+          />
 
           <RightSidebar
             currentQuest={gameState.currentQuest}
