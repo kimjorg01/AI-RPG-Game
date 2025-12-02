@@ -6,17 +6,24 @@ interface DiceRollerProps {
   target: number; // The DC
   statLabel: string;
   onComplete: (total: number) => void;
+  precalculatedRoll?: number;
+  children?: React.ReactNode;
 }
 
-export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLabel, onComplete }) => {
+export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLabel, onComplete, precalculatedRoll, children }) => {
   const [currentNumber, setCurrentNumber] = useState(1);
   const [isRolling, setIsRolling] = useState(true);
   const [phase, setPhase] = useState<'spin' | 'slow' | 'result'>('spin');
   const [finalResult, setFinalResult] = useState<{ raw: number, total: number } | null>(null);
 
   useEffect(() => {
+    // Reset state for new roll
+    setIsRolling(true);
+    setPhase('spin');
+    setFinalResult(null);
+
     // 1. Determine outcome immediately (hidden from user)
-    const rawRoll = Math.floor(Math.random() * 20) + 1;
+    const rawRoll = precalculatedRoll !== undefined ? precalculatedRoll : (Math.floor(Math.random() * 20) + 1);
     const calculatedTotal = rawRoll + modifier;
     
     // 2. Animation Variables
@@ -50,9 +57,8 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLa
            setIsRolling(false);
            
            // Notify parent after viewing result
-           timeoutId = window.setTimeout(() => {
-               onComplete(rawRoll);
-           }, 2500);
+           // REMOVED: Automatic onComplete call. We now wait for user interaction.
+           onComplete(rawRoll);
        }
     };
 
@@ -63,7 +69,7 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLa
         clearTimeout(frameId);
         clearTimeout(timeoutId);
     };
-  }, [modifier, onComplete]);
+  }, [modifier, precalculatedRoll]); // Restart animation if roll changes
 
   const displayTotal = finalResult ? finalResult.total : (currentNumber + modifier);
   const isSuccess = finalResult ? finalResult.total >= target : false;
@@ -162,6 +168,13 @@ export const DiceRoller: React.FC<DiceRollerProps> = ({ modifier, target, statLa
                  </div>
              )}
         </div>
+
+        {/* Action Buttons (Reroll / Proceed) */}
+        {finalResult && children && (
+            <div className="w-full mt-8 animate-slideUp">
+                {children}
+            </div>
+        )}
       </div>
     </div>
   );

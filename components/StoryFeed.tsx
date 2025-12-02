@@ -1,11 +1,16 @@
 
 import React, { useEffect, useRef } from 'react';
-import { StoryTurn } from '../types';
-import { Sparkles, Dices, CheckCircle2, XCircle, Plus, Minus, ArrowUpCircle } from 'lucide-react';
+import { StoryTurn, GameStatus } from '../types';
+import { Sparkles, Dices, CheckCircle2, XCircle, Plus, Minus, ArrowUpCircle, StopCircle, RefreshCw, Trophy, Skull } from 'lucide-react';
 
 interface StoryFeedProps {
   history: StoryTurn[];
   isThinking: boolean;
+  onStop?: () => void;
+  onRetry?: () => void;
+  showRetry?: boolean;
+  gameStatus?: GameStatus;
+  onOpenGameOver?: () => void;
 }
 
 // Simple text parser for bold markdown and emphasis
@@ -22,16 +27,16 @@ const parseText = (text: string) => {
     });
 };
 
-export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking }) => {
+export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking, onStop, onRetry, showRetry, gameStatus, onOpenGameOver }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Scroll to bottom when history changes
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history, isThinking]);
+  }, [history, isThinking, showRetry]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-32">
+    <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-6">
       {history.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full text-zinc-500 opacity-50 space-y-4">
             <Sparkles size={48} />
@@ -127,10 +132,51 @@ export const StoryFeed: React.FC<StoryFeedProps> = ({ history, isThinking }) => 
       ))}
 
       {isThinking && (
-         <div className="max-w-3xl mx-auto flex items-center gap-3 text-amber-500/70 animate-pulse">
-            <Sparkles size={18} className="animate-spin" />
-            <span className="cinzel text-sm tracking-widest">The Dungeon Master is thinking...</span>
+         <div className="max-w-3xl mx-auto flex items-center gap-4 animate-pulse">
+            <div className="flex items-center gap-3 text-amber-500/70">
+                <Sparkles size={18} className="animate-spin" />
+                <span className="cinzel text-sm tracking-widest">The Dungeon Master is thinking...</span>
+            </div>
+            {onStop && (
+                <button 
+                    onClick={onStop}
+                    className="flex items-center gap-2 px-3 py-1 bg-red-900/20 hover:bg-red-900/40 border border-red-800/50 rounded-full text-red-400 text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                    <StopCircle size={12} />
+                    Stop
+                </button>
+            )}
          </div>
+      )}
+
+      {showRetry && onRetry && (
+          <div className="max-w-3xl mx-auto flex justify-center animate-fadeIn">
+              <button 
+                  onClick={onRetry}
+                  className="flex items-center gap-2 px-6 py-2 bg-amber-900/20 hover:bg-amber-900/40 border border-amber-700/50 rounded-full text-amber-400 text-sm font-bold uppercase tracking-widest transition-all hover:scale-105"
+              >
+                  <RefreshCw size={16} />
+                  Retry Request
+              </button>
+          </div>
+      )}
+
+      {/* Game Over Button */}
+      {gameStatus && gameStatus !== 'ongoing' && onOpenGameOver && (
+        <div className="max-w-3xl mx-auto flex justify-center py-8 animate-fadeIn">
+            <button 
+                onClick={onOpenGameOver}
+                className={`
+                    px-8 py-4 rounded-lg font-bold shadow-lg hover:scale-105 transition-all flex items-center gap-3 border
+                    ${gameStatus === 'won' 
+                        ? 'bg-amber-900/20 hover:bg-amber-900/40 border-amber-500/50 text-amber-400' 
+                        : 'bg-red-900/20 hover:bg-red-900/40 border-red-500/50 text-red-400'}
+                `}
+            >
+                {gameStatus === 'won' ? <Trophy size={24} /> : <Skull size={24} />}
+                <span className="cinzel text-lg">View End Screen</span>
+            </button>
+        </div>
       )}
 
       <div ref={bottomRef} />

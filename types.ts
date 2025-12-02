@@ -1,6 +1,6 @@
 
-export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA' | 'PER';
-export type ItemType = 'weapon' | 'armor' | 'accessory' | 'misc';
+export type StatType = 'STR' | 'DEX' | 'CON' | 'INT' | 'CHA' | 'PER' | 'LUK';
+export type ItemType = 'weapon' | 'armor' | 'accessory' | 'consumable' | 'misc';
 
 export interface CharacterStats {
   STR: number;
@@ -9,6 +9,7 @@ export interface CharacterStats {
   INT: number;
   CHA: number;
   PER: number;
+  LUK: number;
 }
 
 export type StatExperience = Record<StatType, number>;
@@ -20,12 +21,22 @@ export interface LevelUpEvent {
   isSpecialEvent?: boolean; // New flag for instant boosts
 }
 
+export interface ConsumableEffect {
+    type: 'heal' | 'stat_boost';
+    value: number; // HP amount or Stat amount
+    stat?: StatType; // For stat_boost
+    duration?: number; // For stat_boost (0 or undefined = instant/permanent? No, usually temporary)
+    penaltyStat?: StatType; // For trade-offs (e.g. +2 STR, -1 INT)
+    penaltyValue?: number;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
   type: ItemType;
   description?: string;
   bonuses?: Partial<CharacterStats>;
+  consumableEffect?: ConsumableEffect;
 }
 
 export interface EquippedGear {
@@ -45,7 +56,22 @@ export interface StatusEffect {
 }
 
 export type GameStatus = 'ongoing' | 'won' | 'lost';
-export type GamePhase = 'menu' | 'setup_genre' | 'setup_stats' | 'playing' | 'game_over';
+export type GamePhase = 'menu' | 'setup_genre' | 'setup_stats' | 'creating_world' | 'playing' | 'game_over';
+
+export interface MainQuest {
+    id: string;
+    title: string;
+    description: string;
+    status: 'active' | 'completed' | 'pending';
+    turnCount?: number;
+}
+
+export interface MainStoryArc {
+    campaignTitle: string;
+    backgroundLore: string;
+    mainQuests: MainQuest[];
+    finalObjective: string;
+}
 
 export interface ChoiceData {
   text: string;
@@ -62,6 +88,25 @@ export interface RollResult {
   difficulty: number;
 }
 
+export type QuestType = 'roll_streak' | 'turn_count' | 'hp_threshold' | 'stat_check_count' | 'inventory_count' | 'any_success_roll' | 'stat_success_count' | 'natural_20' | 'close_call' | 'fully_equipped';
+export type QuestRewardType = 'level_up' | 'heal_hp' | 'restore_custom_choice' | 'item' | 'max_hp_boost' | 'reroll_token' | 'upgrade_equipped' | 'legendary_item' | 'heroic_refill' | 'stat_boost';
+
+export interface SideQuest {
+    id: string;
+    title: string;
+    description: string;
+    type: QuestType;
+    target: number;
+    progress: number;
+    reward: QuestRewardType;
+    rewardValue?: number;
+    statTarget?: StatType; 
+    rewardItem?: InventoryItem;
+    status: 'available' | 'active' | 'completed';
+}
+
+export type GameLength = 'short' | 'medium' | 'long';
+
 export interface GameState {
   inventory: InventoryItem[];
   equipped: EquippedGear;
@@ -72,9 +117,11 @@ export interface GameState {
   hp: number;
   maxHp: number;
   hpHistory: number[]; // For the graph
+  statHistory: CharacterStats[]; // For the graph
   gameStatus: GameStatus;
   phase: GamePhase;
   genre: string;
+  gameLength: GameLength;
   stats: CharacterStats;
   statExperience: StatExperience; // Tracks usage for leveling
   activeEffects: StatusEffect[];
@@ -82,6 +129,10 @@ export interface GameState {
   finalSummary?: string; // AI generated summary
   finalStoryboard?: string; // The 10-panel comic image
   customChoicesRemaining: number; // Limit 3 per game
+  mainStoryArc?: MainStoryArc;
+  activeSideQuests: SideQuest[];
+  pendingLevelUps: number;
+  rerollTokens: number;
 }
 
 export interface StoryTurn {
@@ -106,13 +157,8 @@ export interface AIStoryResponse {
     name: string; 
     type: ItemType; 
     description?: string; 
-    bonuses?: Partial<CharacterStats>; 
   }[];
   inventory_removed?: string[];
-  equipment_update?: {
-    equip?: string[];   // Names of items to equip from inventory
-    unequip?: string[]; // Names of items to unequip to inventory
-  };
   quest_update?: string;
   visual_prompt?: string;
   hp_change?: number;
@@ -125,6 +171,7 @@ export interface AIStoryResponse {
       total: number;
       is_success: boolean;
   };
+  act_completed?: boolean;
 }
 
 export enum ImageSize {
@@ -135,22 +182,21 @@ export enum ImageSize {
 
 export enum StoryModel {
   Smart = "gemini-3-pro-preview",
+  SmartLowThinking = "gemini-3-pro-preview-low",
+  Pro25 = "gemini-2.5-pro",
   Fast = "gemini-2.5-flash",
   LocalQwen = "qwen3:8b",
   LocalGemma = "gemma3:27b",
   LocalQwenCoder = "qwen3-coder:30b",
 }
 
-export enum UIScale {
-  Compact = 0.85,
-  Normal = 1,
-  Large = 1.15
-}
+export type UIScale = number;
 
 export interface AppSettings {
   imageSize: ImageSize;
   storyModel: StoryModel;
   uiScale: UIScale;
+  enableDiceRolls: boolean;
 }
 
 export interface SaveData {
